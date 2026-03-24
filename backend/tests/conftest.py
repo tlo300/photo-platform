@@ -9,6 +9,10 @@ os.environ.setdefault(
     "postgresql+psycopg://app_user:testpassword@localhost:5433/photo_test",
 )
 os.environ.setdefault("ALLOW_OPEN_REGISTRATION", "true")
+os.environ.setdefault("STORAGE_ENDPOINT", "localhost:9002")
+os.environ.setdefault("STORAGE_ACCESS_KEY", "testaccesskey")
+os.environ.setdefault("STORAGE_SECRET_KEY", "testsecretkey")
+os.environ.setdefault("STORAGE_BUCKET", "test-photos")
 
 import pytest
 
