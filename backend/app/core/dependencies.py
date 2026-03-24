@@ -3,6 +3,8 @@ import uuid
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.jwt import decode_access_token
 
@@ -34,3 +36,26 @@ async def get_current_user(
             detail="Invalid or expired token.",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+
+async def get_admin_user(
+    user_id: uuid.UUID = Depends(get_current_user),
+    # Import here to avoid circular imports at module load time.
+) -> uuid.UUID:
+    """Validate the JWT and confirm the user has the admin role.
+
+    Makes a single DB lookup; the session is not yielded so callers that
+    also need a DB session should declare get_authed_session separately.
+    """
+    from app.db import get_session
+    from app.models.user import User, UserRole
+
+    # Use a plain (non-RLS) session — admin checks are not user-scoped.
+    async for session in get_session():
+        user = await session.scalar(select(User).where(User.id == user_id))
+        if user is None or user.role != UserRole.admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Admin access required.",
+            )
+        return user_id
