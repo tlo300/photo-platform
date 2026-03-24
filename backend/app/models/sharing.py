@@ -36,7 +36,7 @@ class Invitation(Base):
         UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
     )
     email: Mapped[str] = mapped_column(String(255), nullable=False)
-    token: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
+    token_hash: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
     created_by: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
@@ -44,4 +44,4 @@ class Invitation(Base):
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
     accepted_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    expires_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), nullable=False)

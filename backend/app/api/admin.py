@@ -10,18 +10,20 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import get_admin_user
 from app.db import get_session
+from app.models.sharing import Invitation
 from app.models.security import SecurityEvent
 from app.models.user import User
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 PASSWORD_RESET_TOKEN_TTL_HOURS = 24
+INVITATION_TTL_HOURS = 48
 
 
 # ---------------------------------------------------------------------------
@@ -293,3 +295,115 @@ async def reset_user_password(
     await session.commit()
 
     return ResetTokenResponse(reset_token=raw_token, expires_at=expires_at)
+
+
+# ---------------------------------------------------------------------------
+# Schemas — invitations
+# ---------------------------------------------------------------------------
+
+
+class CreateInvitationRequest(BaseModel):
+    email: EmailStr
+
+
+class InvitationOut(BaseModel):
+    id: uuid.UUID
+    email: str
+    expires_at: datetime
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class InvitationCreatedResponse(BaseModel):
+    invitation_token: str
+    email: str
+    expires_at: datetime
+
+
+class InvitationsPage(BaseModel):
+    total: int
+    page: int
+    page_size: int
+    items: list[InvitationOut]
+
+
+# ---------------------------------------------------------------------------
+# POST /admin/invitations
+# ---------------------------------------------------------------------------
+
+
+@router.post("/invitations", response_model=InvitationCreatedResponse, status_code=status.HTTP_201_CREATED)
+async def create_invitation(
+    body: CreateInvitationRequest,
+    admin_id: uuid.UUID = Depends(get_admin_user),
+    session: AsyncSession = Depends(get_session),
+) -> InvitationCreatedResponse:
+    """Create a single-use invitation link for a new user.
+
+    Returns the raw token once — only the SHA-256 hash is stored.
+    The admin should pass the token to the invitee out-of-band.
+    """
+    raw_token = secrets.token_urlsafe(32)
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=INVITATION_TTL_HOURS)
+
+    invitation = Invitation(
+        email=body.email,
+        token_hash=_hash_token(raw_token),
+        created_by=admin_id,
+        expires_at=expires_at,
+    )
+    session.add(invitation)
+    await _log_event(
+        session,
+        "admin_invitation_created",
+        admin_id=admin_id,
+        metadata={"email": body.email},
+    )
+    await session.commit()
+
+    return InvitationCreatedResponse(
+        invitation_token=raw_token,
+        email=body.email,
+        expires_at=expires_at,
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /admin/invitations
+# ---------------------------------------------------------------------------
+
+
+@router.get("/invitations", response_model=InvitationsPage)
+async def list_invitations(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=200),
+    _admin: uuid.UUID = Depends(get_admin_user),
+    session: AsyncSession = Depends(get_session),
+) -> InvitationsPage:
+    """Return pending invitations — not yet accepted and not expired.
+
+    Ordered by expires_at ascending (soonest to expire first).
+    """
+    now = datetime.now(timezone.utc)
+    base_q = select(Invitation).where(
+        Invitation.accepted_at.is_(None),
+        Invitation.expires_at > now,
+    )
+    count_q = select(func.count()).select_from(Invitation).where(
+        Invitation.accepted_at.is_(None),
+        Invitation.expires_at > now,
+    )
+
+    total = await session.scalar(count_q) or 0
+    offset = (page - 1) * page_size
+    rows = await session.scalars(
+        base_q.order_by(Invitation.expires_at.asc()).offset(offset).limit(page_size)
+    )
+
+    return InvitationsPage(
+        total=total,
+        page=page,
+        page_size=page_size,
+        items=[InvitationOut.model_validate(r) for r in rows],
+    )
