@@ -9,6 +9,7 @@ psycopg[binary]==3.3.3
 geoalchemy2==0.17.0
 boto3==1.35.99
 python-jose[cryptography]==3.5.0
+pyasn1>=0.6.3  # CVE-2026-30922: fix transitive vuln via python-jose/boto3
 bcrypt==4.2.1
 slowapi==0.1.9
 email-validator==2.2.0
