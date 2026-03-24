@@ -8,21 +8,12 @@ Run with:
 """
 import os
 
-# Point at the test DB before any app modules load.
-# Uses psycopg (v3) async driver — already installed; asyncpg requires a C build not available locally.
-os.environ.setdefault(
-    "DATABASE_URL",
-    "postgresql+psycopg://app_user:testpassword@localhost:5433/photo_test",
-)
-os.environ.setdefault("JWT_SECRET", "test-secret")
-os.environ.setdefault("ALLOW_OPEN_REGISTRATION", "true")
+import pytest
+from alembic import command
+from alembic.config import Config
+from httpx import ASGITransport, AsyncClient
 
-import pytest  # noqa: E402
-from alembic import command  # noqa: E402
-from alembic.config import Config  # noqa: E402
-from httpx import ASGITransport, AsyncClient  # noqa: E402
-
-from app.main import app  # noqa: E402
+from app.main import app
 
 MIGRATOR_URL = os.environ.get(
     "TEST_DATABASE_MIGRATOR_URL",
