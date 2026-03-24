@@ -2,7 +2,7 @@ import logging
 import sys
 from contextvars import ContextVar
 
-from pythonjsonlogger.jsonlogger import JsonFormatter
+from pythonjsonlogger.json import JsonFormatter
 
 # Stores the current request ID for the duration of a single request.
 # Set by RequestIdMiddleware; read by RequestIdFilter.

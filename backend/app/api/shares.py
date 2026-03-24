@@ -37,6 +37,17 @@ def _hash_token(raw: str) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
+_BCRYPT_MAX_BYTES = 72
+
+
+def _check_password_length(password: str) -> None:
+    if len(password.encode()) > _BCRYPT_MAX_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Password must not exceed {_BCRYPT_MAX_BYTES} bytes.",
+        )
+
+
 def _hash_password(password: str) -> str:
     return _bcrypt.hashpw(password.encode(), _bcrypt.gensalt()).decode()
 
@@ -119,6 +130,8 @@ async def create_share(
     The token is returned once — it is not stored and cannot be recovered.
     """
     raw_token = secrets.token_urlsafe(32)
+    if body.password:
+        _check_password_length(body.password)
     pw_hash = _hash_password(body.password) if body.password else None
 
     share = Share(
