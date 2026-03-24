@@ -1,0 +1,5 @@
+# docker-compose.yml
+# Full implementation in issue #1
+# Run: docker compose up
+version: "3.9"
+services: {}
