@@ -2,3 +2,8 @@ fastapi==0.115.5
 uvicorn[standard]==0.32.1
 pydantic-settings==2.7.1
 python-json-logger==2.0.7
+sqlalchemy[asyncio]==2.0.36
+alembic==1.14.0
+asyncpg==0.30.0
+psycopg2-binary==2.9.10
+geoalchemy2==0.17.0

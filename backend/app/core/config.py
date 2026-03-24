@@ -5,8 +5,9 @@ from pydantic import field_validator
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    # Database
+    # Database — app connects via asyncpg; Alembic uses psycopg2 as migrator
     database_url: str = "postgresql+asyncpg://app_user:changeme@db:5432/photo"
+    database_migrator_url: str = "postgresql+psycopg2://migrator:changeme@db:5432/photo"
 
     # Redis
     redis_url: str = "redis://redis:6379/0"
