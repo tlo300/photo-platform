@@ -1,0 +1,4 @@
+# Minimal dependencies to boot the container.
+# Issue #2 (FastAPI scaffold) will expand this list.
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
