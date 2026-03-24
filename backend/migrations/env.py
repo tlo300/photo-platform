@@ -13,7 +13,9 @@ from app.core.config import settings  # noqa: E402
 from app.models import Base  # noqa: E402  — imports all models so metadata is populated
 
 config = context.config
-config.set_main_option("sqlalchemy.url", settings.database_migrator_url)
+# Only set the URL from app settings when not already injected (e.g. by tests)
+if not config.get_main_option("sqlalchemy.url", None):
+    config.set_main_option("sqlalchemy.url", settings.database_migrator_url)
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)

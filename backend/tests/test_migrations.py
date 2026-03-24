@@ -20,11 +20,11 @@ from sqlalchemy import create_engine, inspect, text
 # ---------------------------------------------------------------------------
 MIGRATOR_URL = os.environ.get(
     "TEST_DATABASE_MIGRATOR_URL",
-    "postgresql+psycopg2://migrator:testpassword@localhost:5433/photo_test",
+    "postgresql+psycopg://migrator:testpassword@localhost:5433/photo_test",
 )
 APP_USER_URL = os.environ.get(
     "TEST_DATABASE_APP_URL",
-    "postgresql+psycopg2://app_user:testpassword@localhost:5433/photo_test",
+    "postgresql+psycopg://app_user:testpassword@localhost:5433/photo_test",
 )
 
 
