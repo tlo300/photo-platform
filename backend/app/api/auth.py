@@ -13,6 +13,7 @@ from app.core.config import settings
 from app.core.jwt import create_access_token
 from app.core.limiter import limiter
 from app.db import get_session
+from app.models.sharing import Invitation
 from app.models.refresh_token import RefreshToken
 from app.models.security import SecurityEvent
 from app.models.user import User
@@ -40,6 +41,11 @@ class RegisterRequest(BaseModel):
     email: EmailStr
     display_name: str
     password: str
+    invitation_token: str | None = None
+
+
+class InviteInfoResponse(BaseModel):
+    email: str
 
 
 class LoginRequest(BaseModel):
@@ -74,6 +80,33 @@ def _user_agent(request: Request) -> str | None:
     return request.headers.get("User-Agent")
 
 
+async def _get_valid_invitation(session: AsyncSession, raw_token: str) -> Invitation:
+    """Look up an invitation by raw token and validate it.
+
+    Raises HTTP 410 Gone with a descriptive message for used or expired tokens.
+    """
+    token_hash = _hash_token(raw_token)
+    invitation = await session.scalar(
+        select(Invitation).where(Invitation.token_hash == token_hash)
+    )
+    if invitation is None:
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="Invitation not found or already used.",
+        )
+    if invitation.accepted_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="This invitation has already been used.",
+        )
+    if invitation.expires_at.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="This invitation has expired.",
+        )
+    return invitation
+
+
 async def _log_event(
     session: AsyncSession,
     event_type: str,
@@ -99,6 +132,21 @@ async def _log_event(
 # ---------------------------------------------------------------------------
 
 
+@router.get("/invite/{token}", response_model=InviteInfoResponse)
+async def get_invite(
+    token: str,
+    session: AsyncSession = Depends(get_session),
+) -> InviteInfoResponse:
+    """Return the email associated with a valid invitation token.
+
+    Used by the frontend to pre-fill the registration form.
+    Returns a descriptive 410 Gone for used or expired tokens rather than a
+    generic 404 so the UI can show a meaningful message.
+    """
+    invitation = await _get_valid_invitation(session, token)
+    return InviteInfoResponse(email=invitation.email)
+
+
 @router.post("/register", status_code=status.HTTP_201_CREATED, response_model=TokenResponse)
 @limiter.limit("5/hour")
 async def register(
@@ -106,11 +154,21 @@ async def register(
     request: Request,
     session: AsyncSession = Depends(get_session),
 ) -> TokenResponse:
+    invitation: Invitation | None = None
+
     if not settings.allow_open_registration:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Open registration is disabled. Contact an administrator.",
-        )
+        if not body.invitation_token:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Open registration is disabled. An invitation token is required.",
+            )
+        invitation = await _get_valid_invitation(session, body.invitation_token)
+        # Enforce that the registering email matches the invitation
+        if invitation.email.lower() != body.email.lower():
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Email does not match invitation.",
+            )
 
     existing = await session.scalar(select(User).where(User.email == body.email))
     if existing:
@@ -123,6 +181,13 @@ async def register(
     )
     session.add(user)
     await session.flush()  # populate user.id
+
+    if invitation is not None:
+        await session.execute(
+            update(Invitation)
+            .where(Invitation.id == invitation.id)
+            .values(accepted_at=datetime.now(timezone.utc))
+        )
 
     await _log_event(
         session, "user_registered",
