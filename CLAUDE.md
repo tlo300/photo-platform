@@ -79,7 +79,7 @@ Update this section at the end of every working session.
 
 ```
 Active milestone : 2 – Auth & security
-Last completed  : Milestone 1 complete (all 5 issues merged + dev env fix)
+Last completed  : #6 User registration and login API (pr-open)
 In progress     : (none)
 Blocked         : (none)
 ```
@@ -94,7 +94,7 @@ Update the status column as issues progress.
 | #3    | Database migrations with Alembic         | 1         | pr-open |
 | #4    | MinIO local storage integration          | 1         | pr-open |
 | #5    | Next.js project scaffold                 | 1         | pr-open |
-| #6    | User registration and login API          | 2         | backlog |
+| #6    | User registration and login API          | 2         | pr-open |
 | #7    | Auth middleware and protected routes     | 2         | backlog |
 | #8    | Login UI                                 | 2         | backlog |
 | #9    | Row-level security policies              | 2a        | backlog |
