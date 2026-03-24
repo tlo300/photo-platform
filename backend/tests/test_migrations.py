@@ -72,6 +72,7 @@ EXPECTED_TABLES = {
     "security_events",
     "shares",
     "invitations",
+    "refresh_tokens",
 }
 
 
@@ -84,7 +85,10 @@ def test_all_tables_created(engine):
 def test_users_columns(engine):
     insp = inspect(engine)
     cols = {c["name"] for c in insp.get_columns("users")}
-    assert {"id", "email", "display_name", "role", "storage_used_bytes", "created_at", "suspended_at"}.issubset(cols)
+    assert {
+        "id", "email", "display_name", "role", "storage_used_bytes",
+        "created_at", "suspended_at", "password_hash", "failed_login_attempts", "locked_at",
+    }.issubset(cols)
 
 
 def test_locations_point_is_geometry(engine):

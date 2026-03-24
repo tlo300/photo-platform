@@ -22,6 +22,12 @@ class Settings(BaseSettings):
     storage_bucket: str = "photos"
     storage_use_ssl: bool = False
 
+    # JWT
+    jwt_secret: str = "change-me-in-production"
+    jwt_algorithm: str = "HS256"
+    access_token_expire_minutes: int = 15
+    refresh_token_expire_days: int = 7
+
     # Application
     allow_open_registration: bool = False
     max_upload_size_bytes: int = 5_368_709_120  # 5 GiB

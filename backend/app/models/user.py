@@ -1,7 +1,7 @@
 import enum
 import uuid
 
-from sqlalchemy import BigInteger, DateTime, Enum, String, text
+from sqlalchemy import BigInteger, DateTime, Enum, Integer, String, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -24,6 +24,11 @@ class User(Base):
     role: Mapped[UserRole] = mapped_column(
         Enum(UserRole, name="user_role"), nullable=False, server_default="user"
     )
+    password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    failed_login_attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    locked_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     storage_used_bytes: Mapped[int] = mapped_column(
         BigInteger, nullable=False, server_default=text("0")
     )
