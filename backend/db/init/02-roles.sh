@@ -22,4 +22,10 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
 
     GRANT CONNECT ON DATABASE "${POSTGRES_DB}" TO "${DATABASE_APP_USER}";
     GRANT CONNECT ON DATABASE "${POSTGRES_DB}" TO "${DATABASE_MIGRATOR_USER}";
+
+    -- migrator: full schema access for Alembic (CREATE TABLE, ALTER TABLE, etc.)
+    GRANT USAGE, CREATE ON SCHEMA public TO "${DATABASE_MIGRATOR_USER}";
+
+    -- app_user: schema visibility only; table-level grants are added by the migration
+    GRANT USAGE ON SCHEMA public TO "${DATABASE_APP_USER}";
 EOSQL
