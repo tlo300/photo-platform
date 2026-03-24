@@ -38,10 +38,28 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
         return response
 
 
-app = FastAPI(title="Photo Platform API", lifespan=lifespan, root_path="/api")
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Add security headers to every response to protect against common web vulnerabilities."""
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        response = await call_next(request)
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        return response
+
+
+app = FastAPI(
+    title="Photo Platform API",
+    lifespan=lifespan,
+    root_path="/api",
+    # Suppress detailed server info from OpenAPI schema
+    servers=None,
+)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RequestIdMiddleware)
 app.add_middleware(
     CORSMiddleware,

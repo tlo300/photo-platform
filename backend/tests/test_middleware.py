@@ -1,4 +1,5 @@
-"""Integration tests for auth middleware and protected routes (issue #7).
+"""Integration tests for auth middleware and protected routes (issue #7),
+and security headers middleware (issue #11).
 
 Requires the test PostgreSQL container from docker-compose.test.yml.
 
@@ -15,6 +16,9 @@ Acceptance criteria covered:
   AC6  SET LOCAL app.current_user_id applied on authenticated requests (verified via /users/me)
   AC7  Tokens signed with a different algorithm (alg:none) are rejected with 401
   AC8  X-Request-ID header is present on every response
+  AC9  X-Frame-Options: DENY on all responses (issue #11)
+  AC10 X-Content-Type-Options: nosniff on all responses (issue #11)
+  AC11 Referrer-Policy: strict-origin-when-cross-origin on all responses (issue #11)
 """
 import os
 import time
@@ -252,3 +256,22 @@ async def test_request_id_is_unique_per_request(client: AsyncClient):
     r1 = await client.get(HEALTH_URL)
     r2 = await client.get(HEALTH_URL)
     assert r1.headers["x-request-id"] != r2.headers["x-request-id"]
+
+
+# ---------------------------------------------------------------------------
+# AC9–AC11 — Security headers present on all responses (issue #11)
+# ---------------------------------------------------------------------------
+
+
+async def test_security_headers_on_normal_response(client: AsyncClient):
+    r = await client.get(HEALTH_URL)
+    assert r.headers.get("x-frame-options") == "DENY"
+    assert r.headers.get("x-content-type-options") == "nosniff"
+    assert r.headers.get("referrer-policy") == "strict-origin-when-cross-origin"
+
+
+async def test_security_headers_on_error_response(client: AsyncClient):
+    r = await client.get(ME_URL)  # no token → 401
+    assert r.headers.get("x-frame-options") == "DENY"
+    assert r.headers.get("x-content-type-options") == "nosniff"
+    assert r.headers.get("referrer-policy") == "strict-origin-when-cross-origin"
