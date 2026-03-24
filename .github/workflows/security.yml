@@ -28,11 +28,15 @@ jobs:
         run: pip install pip-audit
 
       - name: Audit backend dependencies
-        # pip-audit exits non-zero on any vulnerability; no extra flags needed
+        # pip-audit exits non-zero on any vulnerability.
+        # CVE-2024-23342 (ecdsa) is ignored: ecdsa is unmaintained with no fix
+        # available; it is a transitive dep of python-jose used only for EC key
+        # generation which this project does not use (HS256/RS256 only).
         run: |
           pip-audit \
             -r backend/requirements.txt \
-            -r backend/requirements-dev.txt
+            -r backend/requirements-dev.txt \
+            --ignore-vuln CVE-2024-23342
 
   npm-audit:
     name: Node dependency audit
