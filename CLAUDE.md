@@ -79,7 +79,7 @@ Update this section at the end of every working session.
 
 ```
 Active milestone : 2a – Security and multi-tenancy
-Last completed  : #9 Row-level security policies (pr-open)
+Last completed  : #10 Storage isolation per user (pr-open)
 In progress     : (none)
 Blocked         : (none)
 ```
@@ -98,7 +98,7 @@ Update the status column as issues progress.
 | #7    | Auth middleware and protected routes     | 2         | pr-open |
 | #8    | Login UI                                 | 2         | pr-open |
 | #9    | Row-level security policies              | 2a        | pr-open |
-| #10   | Storage isolation per user               | 2a        | backlog |
+| #10   | Storage isolation per user               | 2a        | pr-open |
 | #11   | Secure headers and HTTPS enforcement     | 2a        | backlog |
 | #12   | Input validation and upload sanitisation | 2a        | backlog |
 | #13   | Security audit log                       | 2a        | backlog |
