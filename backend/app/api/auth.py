@@ -21,6 +21,17 @@ from app.models.user import User
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
+_BCRYPT_MAX_BYTES = 72  # bcrypt silently truncated >72 bytes in v4; v5 raises ValueError
+
+
+def _check_password_length(password: str) -> None:
+    if len(password.encode()) > _BCRYPT_MAX_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Password must not exceed {_BCRYPT_MAX_BYTES} bytes.",
+        )
+
+
 def _hash_password(password: str) -> str:
     return _bcrypt.hashpw(password.encode(), _bcrypt.gensalt()).decode()
 
@@ -170,6 +181,8 @@ async def register(
                 detail="Email does not match invitation.",
             )
 
+    _check_password_length(body.password)
+
     existing = await session.scalar(select(User).where(User.email == body.email))
     if existing:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered.")
@@ -207,6 +220,8 @@ async def login(
     session: AsyncSession = Depends(get_session),
 ) -> TokenResponse:
     ip = _client_ip(request)
+
+    _check_password_length(body.password)
 
     user = await session.scalar(select(User).where(User.email == body.email))
 
