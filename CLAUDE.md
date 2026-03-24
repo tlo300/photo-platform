@@ -79,7 +79,7 @@ Update this section at the end of every working session.
 
 ```
 Active milestone : 1 – Foundation & infrastructure
-Last completed  : #3 Database migrations with Alembic
+Last completed  : #4 MinIO local storage integration
 In progress     : (none)
 Blocked         : (none)
 ```
@@ -92,7 +92,7 @@ Update the status column as issues progress.
 | #1    | Docker Compose dev environment           | 1         | pr-open |
 | #2    | FastAPI project scaffold                 | 1         | pr-open |
 | #3    | Database migrations with Alembic         | 1         | pr-open |
-| #4    | MinIO local storage integration          | 1         | backlog |
+| #4    | MinIO local storage integration          | 1         | pr-open |
 | #5    | Next.js project scaffold                 | 1         | backlog |
 | #6    | User registration and login API          | 2         | backlog |
 | #7    | Auth middleware and protected routes     | 2         | backlog |
