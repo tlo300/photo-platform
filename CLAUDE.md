@@ -79,7 +79,7 @@ Update this section at the end of every working session.
 
 ```
 Active milestone : 2a – Security and multi-tenancy
-Last completed  : #15 User invitation system (pr-open)
+Last completed  : #17 Dependency scanning and security CI (pr-open)
 In progress     : (none)
 Blocked         : (none)
 ```
@@ -105,7 +105,7 @@ Update the status column as issues progress.
 | #14   | Admin role and user management API       | 2a        | pr-open |
 | #15   | User invitation system                   | 2a        | pr-open |
 | #16   | Sharing data model and API foundation    | 2a        | backlog |
-| #17   | Dependency scanning and security CI      | 2a        | backlog |
+| #17   | Dependency scanning and security CI      | 2a        | pr-open |
 | #18   | Google Takeout sidecar parser            | 3         | backlog |
 | #19   | EXIF extraction from image/video files   | 3         | backlog |
 | #20   | Takeout zip upload and ingestion         | 3         | backlog |
