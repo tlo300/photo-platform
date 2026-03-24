@@ -79,7 +79,7 @@ Update this section at the end of every working session.
 
 ```
 Active milestone : 2 – Auth & security
-Last completed  : #7 Auth middleware and protected routes (pr-open)
+Last completed  : #8 Login UI (pr-open)
 In progress     : (none)
 Blocked         : (none)
 ```
@@ -96,7 +96,7 @@ Update the status column as issues progress.
 | #5    | Next.js project scaffold                 | 1         | pr-open |
 | #6    | User registration and login API          | 2         | pr-open |
 | #7    | Auth middleware and protected routes     | 2         | pr-open |
-| #8    | Login UI                                 | 2         | backlog |
+| #8    | Login UI                                 | 2         | pr-open |
 | #9    | Row-level security policies              | 2a        | backlog |
 | #10   | Storage isolation per user               | 2a        | backlog |
 | #11   | Secure headers and HTTPS enforcement     | 2a        | backlog |
