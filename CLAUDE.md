@@ -79,7 +79,7 @@ Update this section at the end of every working session.
 
 ```
 Active milestone : 2a – Security and multi-tenancy
-Last completed  : #11 Secure headers and HTTPS enforcement (pr-open)
+Last completed  : #12 Input validation and upload sanitisation (pr-open)
 In progress     : (none)
 Blocked         : (none)
 ```
@@ -100,7 +100,7 @@ Update the status column as issues progress.
 | #9    | Row-level security policies              | 2a        | pr-open |
 | #10   | Storage isolation per user               | 2a        | pr-open |
 | #11   | Secure headers and HTTPS enforcement     | 2a        | pr-open |
-| #12   | Input validation and upload sanitisation | 2a        | backlog |
+| #12   | Input validation and upload sanitisation | 2a        | pr-open |
 | #13   | Security audit log                       | 2a        | backlog |
 | #14   | Admin role and user management API       | 2a        | backlog |
 | #15   | User invitation system                   | 2a        | backlog |
