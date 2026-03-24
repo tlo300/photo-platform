@@ -70,20 +70,26 @@ def _client_ip(request: Request) -> str | None:
     return None
 
 
+def _user_agent(request: Request) -> str | None:
+    return request.headers.get("User-Agent")
+
+
 async def _log_event(
     session: AsyncSession,
     event_type: str,
     *,
     user_id: uuid.UUID | None = None,
     ip: str | None = None,
-    detail: dict | None = None,
+    user_agent: str | None = None,
+    metadata: dict | None = None,
 ) -> None:
     session.add(
         SecurityEvent(
             user_id=user_id,
             event_type=event_type,
             ip_address=ip,
-            detail=detail,
+            user_agent=user_agent,
+            event_metadata=metadata,
         )
     )
 
@@ -118,7 +124,10 @@ async def register(
     session.add(user)
     await session.flush()  # populate user.id
 
-    await _log_event(session, "user_registered", user_id=user.id, ip=_client_ip(request))
+    await _log_event(
+        session, "user_registered",
+        user_id=user.id, ip=_client_ip(request), user_agent=_user_agent(request),
+    )
     await session.commit()
 
     return TokenResponse(access_token=create_access_token(str(user.id)))
@@ -140,7 +149,10 @@ async def login(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials.")
 
     if user.locked_at is not None:
-        await _log_event(session, "login_failed_locked", user_id=user.id, ip=ip)
+        await _log_event(
+            session, "login_failed_locked",
+            user_id=user.id, ip=ip, user_agent=_user_agent(request),
+        )
         await session.commit()
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is locked.")
 
@@ -153,11 +165,9 @@ async def login(
             .values(failed_login_attempts=new_attempts, locked_at=lock_time)
         )
         await _log_event(
-            session,
-            "login_failed",
-            user_id=user.id,
-            ip=ip,
-            detail={"attempts": new_attempts},
+            session, "login_failed",
+            user_id=user.id, ip=ip, user_agent=_user_agent(request),
+            metadata={"attempts": new_attempts},
         )
         await session.commit()
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials.")
@@ -178,7 +188,10 @@ async def login(
         )
     )
 
-    await _log_event(session, "login_success", user_id=user.id, ip=ip)
+    await _log_event(
+        session, "login_success",
+        user_id=user.id, ip=ip, user_agent=_user_agent(request),
+    )
     await session.commit()
 
     response.set_cookie(
@@ -232,6 +245,10 @@ async def refresh(
             expires_at=new_expires_at,
         )
     )
+    await _log_event(
+        session, "token_refresh",
+        user_id=record.user_id, ip=_client_ip(request), user_agent=_user_agent(request),
+    )
     await session.commit()
 
     response.set_cookie(
@@ -266,7 +283,8 @@ async def logout(
                 .values(revoked_at=datetime.now(timezone.utc))
             )
             await _log_event(
-                session, "user_logout", user_id=record.user_id, ip=_client_ip(request)
+                session, "user_logout",
+                user_id=record.user_id, ip=_client_ip(request), user_agent=_user_agent(request),
             )
             await session.commit()
 
