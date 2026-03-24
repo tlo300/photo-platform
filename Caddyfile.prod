@@ -1,0 +1,22 @@
+# Production reverse proxy.
+# Caddy handles automatic TLS (Let's Encrypt) and HTTP→HTTPS redirect natively.
+# Replace {$DOMAIN} with the actual domain at deploy time via the DOMAIN env var,
+# or substitute the literal domain name here.
+
+{$DOMAIN} {
+    # Strict-Transport-Security: 2 years, include subdomains.
+    # Caddy sets this automatically for HTTPS sites; we set it explicitly
+    # so the value is auditable here.
+    header Strict-Transport-Security "max-age=63072000; includeSubDomains"
+
+    # API — proxy to FastAPI backend (security headers also added by the app)
+    handle /api/* {
+        uri strip_prefix /api
+        reverse_proxy backend:8000
+    }
+
+    # Everything else — proxy to Next.js frontend (security headers added by Next.js)
+    handle {
+        reverse_proxy frontend:3000
+    }
+}
