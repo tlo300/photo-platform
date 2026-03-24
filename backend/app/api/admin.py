@@ -4,19 +4,59 @@ All routes here require the requesting user to hold the admin role.
 Regular users receive 403 Forbidden regardless of what they attempt.
 """
 
+import hashlib
+import secrets
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import get_admin_user
 from app.db import get_session
 from app.models.security import SecurityEvent
+from app.models.user import User
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+PASSWORD_RESET_TOKEN_TTL_HOURS = 24
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+
+async def _log_event(
+    session: AsyncSession,
+    event_type: str,
+    *,
+    admin_id: uuid.UUID,
+    target_user_id: uuid.UUID | None = None,
+    metadata: dict | None = None,
+) -> None:
+    session.add(
+        SecurityEvent(
+            user_id=admin_id,
+            event_type=event_type,
+            event_metadata={"target_user_id": str(target_user_id), **(metadata or {})}
+            if target_user_id
+            else metadata,
+        )
+    )
+
+
+def _hash_token(raw: str) -> str:
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+async def _get_user_or_404(session: AsyncSession, user_id: uuid.UUID) -> User:
+    user = await session.scalar(select(User).where(User.id == user_id))
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
+    return user
 
 
 # ---------------------------------------------------------------------------
@@ -41,6 +81,31 @@ class SecurityEventsPage(BaseModel):
     page: int
     page_size: int
     items: list[SecurityEventOut]
+
+
+class UserOut(BaseModel):
+    id: uuid.UUID
+    email: str
+    display_name: str
+    role: str
+    storage_used_bytes: int
+    asset_count: int
+    created_at: datetime
+    suspended_at: datetime | None
+
+    model_config = {"from_attributes": True}
+
+
+class UsersPage(BaseModel):
+    total: int
+    page: int
+    page_size: int
+    items: list[UserOut]
+
+
+class ResetTokenResponse(BaseModel):
+    reset_token: str
+    expires_at: datetime
 
 
 # ---------------------------------------------------------------------------
@@ -86,3 +151,145 @@ async def list_security_events(
         page_size=page_size,
         items=[SecurityEventOut.model_validate(r) for r in rows],
     )
+
+
+# ---------------------------------------------------------------------------
+# GET /admin/users
+# ---------------------------------------------------------------------------
+
+
+@router.get("/users", response_model=UsersPage)
+async def list_users(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=200),
+    admin_id: uuid.UUID = Depends(get_admin_user),
+    session: AsyncSession = Depends(get_session),
+) -> UsersPage:
+    """Return a paginated list of all users with storage usage and asset count."""
+    from app.models.media import MediaAsset
+
+    asset_count_sq = (
+        select(MediaAsset.owner_id, func.count().label("asset_count"))
+        .group_by(MediaAsset.owner_id)
+        .subquery()
+    )
+
+    count_q = select(func.count()).select_from(User)
+    total = await session.scalar(count_q) or 0
+
+    rows = await session.execute(
+        select(User, func.coalesce(asset_count_sq.c.asset_count, 0).label("asset_count"))
+        .outerjoin(asset_count_sq, User.id == asset_count_sq.c.owner_id)
+        .order_by(User.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+
+    items = [
+        UserOut(
+            id=u.id,
+            email=u.email,
+            display_name=u.display_name,
+            role=u.role.value,
+            storage_used_bytes=u.storage_used_bytes,
+            asset_count=int(asset_count),
+            created_at=u.created_at,
+            suspended_at=u.suspended_at,
+        )
+        for u, asset_count in rows
+    ]
+
+    return UsersPage(total=total, page=page, page_size=page_size, items=items)
+
+
+# ---------------------------------------------------------------------------
+# DELETE /admin/users/{user_id}
+# ---------------------------------------------------------------------------
+
+
+@router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_user(
+    user_id: uuid.UUID,
+    confirm: bool = Query(default=False, description="Must be true to execute deletion"),
+    admin_id: uuid.UUID = Depends(get_admin_user),
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    """Delete a user and all their assets.
+
+    Requires ?confirm=true.  FK cascade handles deletion of media_assets,
+    albums, tags, refresh_tokens, and other owned rows.
+    """
+    if not confirm:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Pass ?confirm=true to confirm deletion.",
+        )
+
+    user = await _get_user_or_404(session, user_id)
+    await _log_event(session, "admin_user_deleted", admin_id=admin_id, target_user_id=user.id)
+    await session.delete(user)
+    await session.commit()
+
+
+# ---------------------------------------------------------------------------
+# POST /admin/users/{user_id}/suspend
+# ---------------------------------------------------------------------------
+
+
+@router.post("/users/{user_id}/suspend", status_code=status.HTTP_204_NO_CONTENT)
+async def suspend_user(
+    user_id: uuid.UUID,
+    admin_id: uuid.UUID = Depends(get_admin_user),
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    """Set suspended_at on a user account, preventing future logins.
+
+    Idempotent: calling it on an already-suspended user is a no-op.
+    """
+    user = await _get_user_or_404(session, user_id)
+
+    if user.suspended_at is None:
+        await session.execute(
+            update(User)
+            .where(User.id == user_id)
+            .values(suspended_at=datetime.now(timezone.utc))
+        )
+        await _log_event(session, "admin_user_suspended", admin_id=admin_id, target_user_id=user_id)
+        await session.commit()
+
+
+# ---------------------------------------------------------------------------
+# POST /admin/users/{user_id}/reset-password
+# ---------------------------------------------------------------------------
+
+
+@router.post("/users/{user_id}/reset-password", response_model=ResetTokenResponse)
+async def reset_user_password(
+    user_id: uuid.UUID,
+    admin_id: uuid.UUID = Depends(get_admin_user),
+    session: AsyncSession = Depends(get_session),
+) -> ResetTokenResponse:
+    """Generate a one-time password reset token for a user.
+
+    The raw token is returned to the admin to pass to the user out-of-band.
+    Only the SHA-256 hash is stored.  The token expires after 24 hours.
+    """
+    await _get_user_or_404(session, user_id)
+
+    raw_token = secrets.token_urlsafe(32)
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=PASSWORD_RESET_TOKEN_TTL_HOURS)
+
+    await session.execute(
+        update(User)
+        .where(User.id == user_id)
+        .values(
+            password_reset_token_hash=_hash_token(raw_token),
+            password_reset_token_expires_at=expires_at,
+        )
+    )
+    await _log_event(
+        session, "admin_password_reset_issued", admin_id=admin_id, target_user_id=user_id
+    )
+    await session.commit()
+
+    return ResetTokenResponse(reset_token=raw_token, expires_at=expires_at)

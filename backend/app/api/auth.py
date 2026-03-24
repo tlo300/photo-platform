@@ -156,6 +156,14 @@ async def login(
         await session.commit()
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is locked.")
 
+    if user.suspended_at is not None:
+        await _log_event(
+            session, "login_failed_suspended",
+            user_id=user.id, ip=ip, user_agent=_user_agent(request),
+        )
+        await session.commit()
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is suspended.")
+
     if not _verify_password(body.password, user.password_hash):
         new_attempts = user.failed_login_attempts + 1
         lock_time = datetime.now(timezone.utc) if new_attempts >= LOCKOUT_THRESHOLD else None
