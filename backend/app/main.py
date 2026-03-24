@@ -9,6 +9,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.api.admin import router as admin_router
 from app.api.auth import router as auth_router
+from app.api.shares import router as shares_router
 from app.api.users import router as users_router
 from app.core.config import settings
 from app.core.limiter import limiter
@@ -73,6 +74,7 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(users_router)
 app.include_router(admin_router)
+app.include_router(shares_router)
 
 
 @app.get("/health")
