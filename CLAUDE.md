@@ -78,8 +78,8 @@ When making a non-obvious technical decision, create docs/decisions/NNN-short-ti
 Update this section at the end of every working session.
 
 ```
-Active milestone : 1 – Foundation & infrastructure
-Last completed  : #5 Next.js project scaffold
+Active milestone : 2 – Auth & security
+Last completed  : Milestone 1 complete (all 5 issues merged + dev env fix)
 In progress     : (none)
 Blocked         : (none)
 ```
