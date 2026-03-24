@@ -1,0 +1,72 @@
+version: "3.9"
+
+# Isolated infrastructure services for CI.
+# App services (backend, frontend) are not included — tests run against
+# these infra containers directly via exposed ports on the test network.
+
+networks:
+  test-net:
+    driver: bridge
+
+volumes:
+  test_postgres_data:
+  test_minio_data:
+  test_redis_data:
+
+services:
+
+  db:
+    image: postgis/postgis:16-3.4-alpine
+    environment:
+      POSTGRES_DB: photo_test
+      POSTGRES_USER: superuser
+      POSTGRES_PASSWORD: superpassword
+      DATABASE_APP_USER: app_user
+      DATABASE_APP_PASSWORD: testpassword
+      DATABASE_MIGRATOR_USER: migrator
+      DATABASE_MIGRATOR_PASSWORD: testpassword
+    volumes:
+      - test_postgres_data:/var/lib/postgresql/data
+      - ./backend/db/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "5433:5432"
+    networks:
+      - test-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U superuser -d photo_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6380:6379"
+    networks:
+      - test-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  minio:
+    image: minio/minio:latest
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: testaccesskey
+      MINIO_ROOT_PASSWORD: testsecretkey
+    volumes:
+      - test_minio_data:/data
+    ports:
+      - "9002:9000"
+    networks:
+      - test-net
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s

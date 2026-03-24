@@ -1,0 +1,15 @@
+# Dev reverse proxy — routes traffic to backend and frontend containers.
+# No TLS in dev; Caddy listens on :80 only.
+
+:80 {
+    # API — proxy to FastAPI backend
+    handle /api/* {
+        uri strip_prefix /api
+        reverse_proxy backend:8000
+    }
+
+    # Everything else — proxy to Next.js frontend
+    handle {
+        reverse_proxy frontend:3000
+    }
+}
