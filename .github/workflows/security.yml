@@ -28,12 +28,11 @@ jobs:
         run: pip install pip-audit
 
       - name: Audit backend dependencies
+        # pip-audit exits non-zero on any vulnerability; no extra flags needed
         run: |
           pip-audit \
             -r backend/requirements.txt \
-            -r backend/requirements-dev.txt \
-            --severity high \
-            --fail-on-vuln
+            -r backend/requirements-dev.txt
 
   npm-audit:
     name: Node dependency audit
