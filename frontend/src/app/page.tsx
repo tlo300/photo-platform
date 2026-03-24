@@ -1,11 +1,20 @@
-/**
- * Placeholder home page — issue #5 (Next.js scaffold) will replace this.
- */
-export default function Home() {
+import { checkHealth } from "@/lib/api";
+
+export default async function Home() {
+  const connected = await checkHealth();
+
   return (
-    <main>
-      <h1>Photo Platform</h1>
-      <p>Coming soon.</p>
+    <main className="flex min-h-screen flex-col items-center justify-center gap-4 p-8">
+      <h1 className="text-3xl font-bold">Photo Platform</h1>
+      {connected ? (
+        <p className="rounded-md bg-green-100 px-4 py-2 text-green-800">
+          API connected
+        </p>
+      ) : (
+        <p className="rounded-md bg-red-100 px-4 py-2 text-red-800">
+          API unavailable
+        </p>
+      )}
     </main>
   );
 }
