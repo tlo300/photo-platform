@@ -15,6 +15,13 @@ class Settings(BaseSettings):
     # CORS — comma-separated origins, e.g. "http://localhost:3000,http://localhost"
     cors_allowed_origins: str = "http://localhost:3000,http://localhost"
 
+    # Object storage (MinIO locally; any S3-compatible endpoint in production)
+    storage_endpoint: str = "minio:9000"
+    storage_access_key: str = "changeme"
+    storage_secret_key: str = "changeme"
+    storage_bucket: str = "photos"
+    storage_use_ssl: bool = False
+
     # Application
     allow_open_registration: bool = False
     max_upload_size_bytes: int = 5_368_709_120  # 5 GiB

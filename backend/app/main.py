@@ -1,12 +1,22 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.core.logging import configure_logging
+from app.services.storage import storage_service
 
 configure_logging()
 
-app = FastAPI(title="Photo Platform API")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    storage_service.ensure_bucket_exists()
+    yield
+
+
+app = FastAPI(title="Photo Platform API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
