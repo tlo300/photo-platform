@@ -11,6 +11,6 @@ boto3==1.35.99
 python-jose[cryptography]==3.5.0
 bcrypt==4.2.1
 slowapi==0.1.9
-email-validator==2.2.0
+email-validator==2.3.0
 filetype==1.2.0
 Pillow==12.1.1
