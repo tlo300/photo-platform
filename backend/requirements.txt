@@ -1,4 +1,4 @@
-# Minimal dependencies to boot the container.
-# Issue #2 (FastAPI scaffold) will expand this list.
 fastapi==0.115.5
 uvicorn[standard]==0.32.1
+pydantic-settings==2.7.1
+python-json-logger==2.0.7

@@ -79,8 +79,8 @@ Update this section at the end of every working session.
 
 ```
 Active milestone : 1 – Foundation & infrastructure
-Last completed  : #1 Docker Compose dev environment
-In progress     : (none yet)
+Last completed  : #2 FastAPI project scaffold
+In progress     : (none)
 Blocked         : (none)
 ```
 
@@ -90,7 +90,7 @@ Update the status column as issues progress.
 | Issue | Title                                    | Milestone | Status  |
 |-------|------------------------------------------|-----------|---------|
 | #1    | Docker Compose dev environment           | 1         | pr-open |
-| #2    | FastAPI project scaffold                 | 1         | backlog |
+| #2    | FastAPI project scaffold                 | 1         | pr-open |
 | #3    | Database migrations with Alembic         | 1         | backlog |
 | #4    | MinIO local storage integration          | 1         | backlog |
 | #5    | Next.js project scaffold                 | 1         | backlog |
