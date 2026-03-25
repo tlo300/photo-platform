@@ -270,6 +270,22 @@ export interface AssetDetail {
   tags: AssetTagItem[];
 }
 
+export async function searchAssets(
+  token: string,
+  q: string,
+  limit = 50
+): Promise<AssetsPage> {
+  const params = new URLSearchParams({ q, limit: String(limit) });
+  const res = await fetch(`${CLIENT_API_URL}/assets/search?${params}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error((data as { detail?: string }).detail ?? "Search failed");
+  }
+  return res.json();
+}
+
 export async function getAsset(token: string, id: string): Promise<AssetDetail> {
   const res = await fetch(`${CLIENT_API_URL}/assets/${id}`, {
     headers: { Authorization: `Bearer ${token}` },
