@@ -303,6 +303,7 @@ async def test_get_job_happy_path(user_token: str, created_job_id: str):
     assert body["job_id"] == created_job_id
     assert body["status"] in ("pending", "processing", "done", "failed")
     assert body["processed"] == 0
+    assert body["duplicates"] == 0
     assert body["errors"] == []
     assert "total" in body
 

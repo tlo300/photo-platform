@@ -194,38 +194,45 @@ async def _ingest_one(
     sidecar_set: set[str],
 ) -> None:
     """Ingest a single media file from the zip.  Errors are caught and appended to job.errors."""
+    import contextlib
+    from app.services.storage import StorageError
+
+    data = zf.read(media_name)
+    checksum = _sha256_bytes(data)
+
+    # Dedup check — outside the savepoint so we don't need to roll it back
+    existing = await session.scalar(
+        select(MediaAsset.id).where(
+            MediaAsset.owner_id == owner_id,
+            MediaAsset.checksum == checksum,
+        )
+    )
+    if existing is not None:
+        logger.debug("Skipping duplicate %s (checksum %s)", media_name, checksum)
+        job.duplicates += 1
+        return
+
+    staged_key: str | None = None
     try:
-        data = zf.read(media_name)
-        checksum = _sha256_bytes(data)
+        async with session.begin_nested():
+            # All DB writes are inside a savepoint — on failure the savepoint is
+            # rolled back automatically without touching the outer transaction.
+            mime = _mime_from_magic(data)
+            if mime is None:
+                raise ValueError("Unsupported or undetectable file type")
 
-        # Dedup check — skip silently if the file already exists for this user
-        existing = await session.scalar(
-            select(MediaAsset.id).where(
-                MediaAsset.owner_id == owner_id,
-                MediaAsset.checksum == checksum,
+            asset_id = uuid.uuid4()
+            suffix = _suffix_for_mime(mime)
+            original_filename = Path(media_name).name
+
+            staged_key = storage_service.upload(
+                str(owner_id),
+                str(asset_id),
+                io.BytesIO(data),
+                suffix,
+                mime,
             )
-        )
-        if existing is not None:
-            logger.debug("Skipping duplicate %s (checksum %s)", media_name, checksum)
-            return
 
-        mime = _mime_from_magic(data)
-        if mime is None:
-            raise ValueError(f"Unsupported or undetectable file type")
-
-        asset_id = uuid.uuid4()
-        suffix = _suffix_for_mime(mime)
-        original_filename = Path(media_name).name
-
-        key = storage_service.upload(
-            str(owner_id),
-            str(asset_id),
-            io.BytesIO(data),
-            suffix,
-            mime,
-        )
-
-        try:
             from app.models.media import MediaAsset as _MA
 
             asset = _MA(
@@ -234,7 +241,7 @@ async def _ingest_one(
                 file_size_bytes=len(data),
                 original_filename=original_filename,
                 mime_type=mime,
-                storage_key=key,
+                storage_key=staged_key,
                 checksum=checksum,
             )
             session.add(asset)
@@ -247,59 +254,55 @@ async def _ingest_one(
                 {"delta": len(data), "uid": owner_id},
             )
             await session.flush()
-        except Exception:
-            import contextlib
-            from app.services.storage import StorageError
-            with contextlib.suppress(StorageError):
-                storage_service.delete(key)
-            raise
 
-        # EXIF extraction
-        exif_result = extract_exif(data, mime)
+            # EXIF extraction
+            exif_result = extract_exif(data, mime)
 
-        # Sidecar lookup — try standard name then truncated variant
-        sidecar_data: dict | None = None
-        for candidate in (_sidecar_name(media_name), _sidecar_name(Path(media_name).name)):
-            if candidate.lower() in sidecar_set:
-                try:
-                    raw_bytes = zf.read(candidate) if candidate in zf.namelist() else None
-                    if raw_bytes is None:
-                        # Try case-insensitive match
-                        for real_name in zf.namelist():
-                            if real_name.lower() == candidate.lower():
-                                raw_bytes = zf.read(real_name)
-                                break
-                    if raw_bytes:
-                        sidecar_data = json.loads(raw_bytes.decode("utf-8", errors="replace"))
-                except Exception as exc:
-                    logger.warning("Could not read sidecar %s: %s", candidate, exc)
-                break
+            # Sidecar lookup — try standard name then truncated variant
+            sidecar_data: dict | None = None
+            for candidate in (_sidecar_name(media_name), _sidecar_name(Path(media_name).name)):
+                if candidate.lower() in sidecar_set:
+                    try:
+                        raw_bytes = zf.read(candidate) if candidate in zf.namelist() else None
+                        if raw_bytes is None:
+                            for real_name in zf.namelist():
+                                if real_name.lower() == candidate.lower():
+                                    raw_bytes = zf.read(real_name)
+                                    break
+                        if raw_bytes:
+                            sidecar_data = json.loads(raw_bytes.decode("utf-8", errors="replace"))
+                    except Exception as exc:
+                        logger.warning("Could not read sidecar %s: %s", candidate, exc)
+                    break
 
-        parsed_sidecar = parse_sidecar(sidecar_data) if sidecar_data else None
+            parsed_sidecar = parse_sidecar(sidecar_data) if sidecar_data else None
 
-        await apply_exif(
-            session,
-            asset_id=asset_id,
-            result=exif_result,
-            sidecar_captured_at=parsed_sidecar.captured_at if parsed_sidecar else None,
-        )
-
-        if parsed_sidecar is not None:
-            await apply_sidecar(
+            await apply_exif(
                 session,
                 asset_id=asset_id,
-                owner_id=owner_id,
-                parsed=parsed_sidecar,
+                result=exif_result,
+                sidecar_captured_at=parsed_sidecar.captured_at if parsed_sidecar else None,
             )
 
-        await session.flush()
+            if parsed_sidecar is not None:
+                await apply_sidecar(
+                    session,
+                    asset_id=asset_id,
+                    owner_id=owner_id,
+                    parsed=parsed_sidecar,
+                )
+
+            await session.flush()
 
     except Exception as exc:
         logger.warning("Failed to ingest %s: %s", media_name, exc)
+        # Clean up the staged S3 object if it was uploaded before the DB write failed
+        if staged_key is not None:
+            with contextlib.suppress(StorageError):
+                storage_service.delete(staged_key)
         errors = list(job.errors or [])
         errors.append({"filename": Path(media_name).name, "reason": str(exc)})
         job.errors = errors
-        await session.rollback()
         await _set_rls(session, owner_id)
 
 

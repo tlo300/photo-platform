@@ -137,6 +137,73 @@ export async function listInvitations(
   return res.json();
 }
 
+export interface ImportJobStatus {
+  job_id: string;
+  status: "pending" | "processing" | "done" | "failed";
+  total: number | null;
+  processed: number;
+  duplicates: number;
+  errors: { filename: string | null; reason: string }[];
+}
+
+export function startTakeoutImport(
+  token: string,
+  file: File,
+  onUploadProgress: (percent: number) => void
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    const form = new FormData();
+    form.append("file", file);
+
+    xhr.open("POST", `${CLIENT_API_URL}/import/takeout`);
+    xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+
+    xhr.upload.addEventListener("progress", (e) => {
+      if (e.lengthComputable) {
+        onUploadProgress(Math.round((e.loaded / e.total) * 100));
+      }
+    });
+
+    xhr.addEventListener("load", () => {
+      if (xhr.status === 202) {
+        try {
+          const data = JSON.parse(xhr.responseText) as { job_id: string };
+          resolve(data.job_id);
+        } catch {
+          reject(new Error("Unexpected response from server"));
+        }
+      } else {
+        try {
+          const data = JSON.parse(xhr.responseText) as { detail?: string };
+          reject(new Error(data.detail ?? `Upload failed (${xhr.status})`));
+        } catch {
+          reject(new Error(`Upload failed (${xhr.status})`));
+        }
+      }
+    });
+
+    xhr.addEventListener("error", () => reject(new Error("Network error during upload")));
+    xhr.addEventListener("abort", () => reject(new Error("Upload aborted")));
+
+    xhr.send(form);
+  });
+}
+
+export async function getImportJob(
+  token: string,
+  jobId: string
+): Promise<ImportJobStatus> {
+  const res = await fetch(`${CLIENT_API_URL}/import/jobs/${jobId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error((data as { detail?: string }).detail ?? "Failed to fetch job status");
+  }
+  return res.json();
+}
+
 export async function createInvitation(
   token: string,
   email: string
