@@ -43,6 +43,7 @@ class ImportJobResponse(BaseModel):
     status: ImportJobStatus
     total: int | None
     processed: int
+    duplicates: int
     errors: list[dict]
 
 
@@ -161,5 +162,6 @@ async def get_import_job(
         status=job.status,
         total=job.total,
         processed=job.processed,
+        duplicates=job.duplicates,
         errors=list(job.errors or []),
     )

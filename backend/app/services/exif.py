@@ -156,10 +156,14 @@ async def apply_exif(
 
 
 def _str_or_none(value: object) -> str | None:
-    """Return stripped string or None for empty/missing values."""
+    """Return stripped string or None for empty/missing values.
+
+    Also strips null bytes, which some EXIF strings contain and PostgreSQL
+    rejects with CharacterNotInRepertoireError.
+    """
     if value is None:
         return None
-    s = str(value).strip()
+    s = str(value).replace("\x00", "").strip()
     return s or None
 
 

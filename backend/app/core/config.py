@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     # Application
     allow_open_registration: bool = False
     max_upload_size_bytes: int = 5_368_709_120  # 5 GiB
+    cookie_secure: bool = True  # set False in dev when running over plain HTTP
 
     @field_validator("cors_allowed_origins", mode="before")
     @classmethod
