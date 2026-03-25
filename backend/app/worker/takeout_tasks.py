@@ -9,9 +9,9 @@ Processing pipeline per media file:
   2. Magic-byte validation against the allowed MIME whitelist
   3. Upload original to MinIO under {user_id}/{asset_id}/original.ext
   4. Write MediaAsset row + increment users.storage_used_bytes
-  5. Extract EXIF metadata → write MediaMetadata row
-  6. Parse sidecar (if present) → write Location, tags, raw JSON
-     Sidecar timestamp overrides EXIF timestamp per architecture rule.
+  5. Extract EXIF → merge_metadata(exif, sidecar) → set asset.captured_at
+  6. apply_exif → write MediaMetadata row (make/model/dimensions only)
+  7. apply_sidecar (if present) → write Location, tags, raw JSON
 
 Failed files are recorded in import_jobs.errors and never abort the job.
 """
@@ -36,6 +36,7 @@ from app.core.config import settings
 from app.models.import_job import ImportJob, ImportJobStatus
 from app.models.media import MediaAsset
 from app.services.exif import apply_exif, extract_exif
+from app.services.metadata_merge import merge_metadata
 from app.services.storage import storage_service
 from app.services.takeout_sidecar import apply_sidecar, parse_sidecar
 from app.services.upload_validation import ALLOWED_MIME_TYPES, check_zip_safe
@@ -277,11 +278,16 @@ async def _ingest_one(
 
             parsed_sidecar = parse_sidecar(sidecar_data) if sidecar_data else None
 
+            # Resolve captured_at via the canonical merge strategy
+            canonical = merge_metadata(exif_result, parsed_sidecar)
+            if canonical.captured_at is not None:
+                asset.captured_at = canonical.captured_at
+                session.add(asset)
+
             await apply_exif(
                 session,
                 asset_id=asset_id,
                 result=exif_result,
-                sidecar_captured_at=parsed_sidecar.captured_at if parsed_sidecar else None,
             )
 
             if parsed_sidecar is not None:
