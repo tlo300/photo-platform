@@ -6,7 +6,7 @@ import type { NextConfig } from "next";
 // Extend this list as new trusted third-party origins are added.
 const CSP = [
   "default-src 'self'",
-  "script-src 'self'",
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' blob: data:",
   "font-src 'self'",
