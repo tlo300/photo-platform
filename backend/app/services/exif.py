@@ -78,9 +78,14 @@ def extract_exif(data: bytes, mime_type: str) -> ExifResult:
         width, height = img.size
 
         raw_exif = img.getexif()
+        # DateTimeOriginal lives in the Exif sub-IFD (tag 34665), not the
+        # top-level IFD0, so we must check both.
+        exif_ifd = raw_exif.get_ifd(34665)
         make = _str_or_none(raw_exif.get(_TAG_MAKE))
         model = _str_or_none(raw_exif.get(_TAG_MODEL))
-        captured_at = _parse_exif_datetime(raw_exif.get(_TAG_DATETIME_ORIGINAL))
+        captured_at = _parse_exif_datetime(
+            exif_ifd.get(_TAG_DATETIME_ORIGINAL) or raw_exif.get(_TAG_DATETIME_ORIGINAL)
+        )
 
         return ExifResult(
             make=make,
