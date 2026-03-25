@@ -79,10 +79,30 @@ Update this section at the end of every working session.
 
 ```
 Active milestone : 4 – Photo library and browsing
-Last completed  : #26 Basic search (PR pending, 2026-03-25)
+Last completed  : #43 GPS location storage and geo-based browsing API (PR pending, 2026-03-25)
 In progress     : (none)
 Blocked         : (none)
 ```
+
+### Handoff — 2026-03-25 (#43 GPS location storage and geo-based browsing API)
+**Completed:**
+- `locations.point` GEOGRAPHY(POINT, 4326) column + GiST index already existed from migration 0001
+- `has_location=true/false` filter was already implemented in GET /assets (from #22)
+- Added `near=lat,lon` and `radius_km=N` query params to `GET /assets`
+- Uses `ST_DWithin(point::geography, target::geography, metres)` — picks up the GiST index
+- When `near` is active: JOIN locations, filter by ST_DWithin, order by ST_Distance ASC,
+  cursor pagination bypassed (next_cursor always null)
+- 8 integration tests in `tests/test_location_api.py`
+
+**Gotchas:**
+- The existing `point` column is `GEOMETRY(POINT, 4326)`, not `GEOGRAPHY`. Must cast both sides
+  to `Geography` via SQLAlchemy `cast(col, Geography)` for ST_DWithin to measure in metres.
+- `near` filter does a JOIN to locations, so assets without a location row are automatically
+  excluded — no extra EXISTS check needed.
+- Cursor pagination is incompatible with distance ordering; followed the search endpoint pattern
+  of returning up to `limit` results with `next_cursor=null`.
+
+**Suggested next step:** Open PRs for #25, #26, #43, then move to #27 Albums API.
 
 ### Handoff — 2026-03-25 (#26 Basic search)
 **Completed:**
@@ -160,6 +180,7 @@ Update the status column as issues progress.
 | #74   | Local folder import                      | 3         | pr-open |
 | #75   | Preserve Takeout folder structure as albums | 3      | merged  |
 | #22   | Library API (paginated timeline)         | 4         | pr-open |
+| #43   | GPS location storage and geo-based browsing API | 4    | pr-open |
 | #23   | Thumbnail generation worker              | 4         | merged  |
 | #24   | Timeline grid UI                         | 4         | pr-open |
 | #25   | Asset detail view                        | 4         | pr-open |
