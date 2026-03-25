@@ -59,6 +59,11 @@ class MediaMetadata(Base):
     width_px: Mapped[int | None] = mapped_column(Integer, nullable=True)
     height_px: Mapped[int | None] = mapped_column(Integer, nullable=True)
     duration_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    iso: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    aperture: Mapped[float | None] = mapped_column(Float, nullable=True)
+    shutter_speed: Mapped[float | None] = mapped_column(Float, nullable=True)
+    focal_length: Mapped[float | None] = mapped_column(Float, nullable=True)
+    flash: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
 
 class Location(Base):
