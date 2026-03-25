@@ -8,6 +8,7 @@ from slowapi.errors import RateLimitExceeded
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.api.admin import router as admin_router
+from app.api.assets import router as assets_router
 from app.api.auth import router as auth_router
 from app.api.import_ import router as import_router
 from app.api.shares import router as shares_router
@@ -77,6 +78,7 @@ app.include_router(users_router)
 app.include_router(admin_router)
 app.include_router(shares_router)
 app.include_router(import_router)
+app.include_router(assets_router)
 
 
 @app.get("/health")
