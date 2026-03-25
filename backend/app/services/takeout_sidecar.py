@@ -1,11 +1,12 @@
 """Google Takeout JSON sidecar parser.
 
 Two public entry points:
-  parse_sidecar(raw)        — pure function, no DB, safe to call anywhere.
-  apply_sidecar(...)        — persists the parsed result to the database.
+  parse_sidecar(raw)   — pure function, no DB, safe to call anywhere.
+  apply_sidecar(...)   — persists the parsed result to the database.
 
-Field priority: sidecar timestamps take precedence over embedded EXIF
-(enforced by the caller; apply_sidecar always writes captured_at when present).
+apply_sidecar writes description, location, people-tags, and raw JSON.
+captured_at is owned by the caller (via merge_metadata) — apply_sidecar never
+touches media_assets.captured_at.
 """
 
 import logging
@@ -107,20 +108,18 @@ async def apply_sidecar(
     """Write a ParsedSidecar to the database for *asset_id*.
 
     Operations performed (all flushed together):
-      1. Update media_assets.captured_at and .description.
+      1. Update media_assets.description (captured_at is set by the caller).
       2. Upsert a locations row when has_geo is True.
       3. Upsert tags for each person with source='google_people'.
       4. Upsert google_metadata_raw with the verbatim JSON.
 
     The caller owns commit/rollback.
     """
-    # 1. Update the asset row
+    # 1. Update the asset row (description only — caller sets captured_at)
     asset = await session.get(MediaAsset, asset_id)
     if asset is None:
         raise ValueError(f"Asset {asset_id!r} not found")
 
-    if parsed.captured_at is not None:
-        asset.captured_at = parsed.captured_at
     if parsed.description is not None:
         asset.description = parsed.description
     session.add(asset)

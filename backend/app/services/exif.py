@@ -1,11 +1,12 @@
 """EXIF metadata extraction from image and video files.
 
 Two public entry points:
-  extract_exif(data, mime_type)                  — pure function, never raises.
-  apply_exif(session, *, asset_id, result, ...)  — persists to DB.
+  extract_exif(data, mime_type)            — pure function, never raises.
+  apply_exif(session, *, asset_id, result) — persists to DB.
 
-Timestamp priority (enforced by the caller via sidecar_captured_at):
-  Google Takeout sidecar photoTakenTime > EXIF DateTimeOriginal.
+apply_exif only writes make/model/width/height to media_metadata.
+captured_at is owned by the caller (via merge_metadata) — apply_exif never
+touches media_assets.captured_at.
 """
 
 import logging
@@ -18,7 +19,7 @@ from PIL import Image
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.media import MediaAsset, MediaMetadata
+from app.models.media import MediaMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -109,14 +110,11 @@ async def apply_exif(
     *,
     asset_id: uuid.UUID,
     result: ExifResult,
-    sidecar_captured_at: datetime | None = None,
 ) -> None:
     """Write *result* to the database for *asset_id*.
 
-    Operations performed (all flushed together):
-      1. Upsert a media_metadata row with make, model, width_px, height_px.
-      2. Update media_assets.captured_at from EXIF only when *sidecar_captured_at*
-         is None — sidecar timestamps always take priority.
+    Only upserts make/model/width_px/height_px into media_metadata.
+    captured_at is set by the caller after merge_metadata() resolves priority.
 
     The caller owns commit/rollback.
     """
@@ -140,13 +138,6 @@ async def apply_exif(
         )
     )
     await session.execute(stmt)
-
-    if sidecar_captured_at is None and result.captured_at is not None:
-        asset = await session.get(MediaAsset, asset_id)
-        if asset is not None:
-            asset.captured_at = result.captured_at
-            session.add(asset)
-
     await session.flush()
 
 
