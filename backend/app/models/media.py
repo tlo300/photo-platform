@@ -31,6 +31,12 @@ class MediaAsset(Base):
     sidecar_missing: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )
+    thumbnail_ready: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    thumbnail_error: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
     created_at: Mapped[DateTime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )

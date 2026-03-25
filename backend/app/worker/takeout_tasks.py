@@ -422,6 +422,11 @@ async def _ingest_one(
 
             await session.flush()
 
+        # Dispatch thumbnail generation outside the savepoint so it only runs
+        # when the DB write has succeeded.
+        from app.worker.thumbnail_tasks import generate_thumbnails
+        generate_thumbnails.delay(str(asset_id), str(owner_id))
+
     except Exception as exc:
         logger.warning("Failed to ingest %s: %s", media_name, exc)
         # Clean up the staged S3 object if it was uploaded before the DB write failed
@@ -680,6 +685,11 @@ async def _ingest_one_from_path(
                     await _link_asset_to_album(session, album_id, asset_id)
 
             await session.flush()
+
+        # Dispatch thumbnail generation outside the savepoint so it only runs
+        # when the DB write has succeeded.
+        from app.worker.thumbnail_tasks import generate_thumbnails
+        generate_thumbnails.delay(str(asset_id), str(owner_id))
 
     except Exception as exc:
         logger.warning("Failed to ingest %s: %s", file_path.name, exc)
