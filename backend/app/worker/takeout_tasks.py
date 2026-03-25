@@ -27,6 +27,7 @@ import os
 import tempfile
 import uuid
 import zipfile
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
@@ -149,11 +150,104 @@ def _zip_folder_path(media_name: str) -> str | None:
     return None if parent == "." else parent
 
 
+@dataclass
+class _AlbumMeta:
+    """Title and description sourced from a Google Takeout album-level metadata.json."""
+
+    title: str
+    description: str | None = None
+
+
+@dataclass
+class _AlbumIndex:
+    """Pre-scanned album metadata and per-file sort orders for a Takeout zip.
+
+    meta        — folder_path → AlbumMeta (populated from folder-level metadata.json)
+    sort_orders — zip_entry_name → sort_order within its containing folder
+    """
+
+    meta: dict[str, _AlbumMeta] = field(default_factory=dict)
+    sort_orders: dict[str, int] = field(default_factory=dict)
+
+
+def _build_album_index(zf: zipfile.ZipFile) -> _AlbumIndex:
+    """Pre-scan *zf* to build album metadata and per-file sort orders.
+
+    Two passes over the zip name list:
+      1. Find folder-level ``metadata.json`` files → populate AlbumMeta by folder path.
+      2. Read per-photo sidecars for ``photoTakenTime`` → sort media within each folder
+         by (timestamp, filename) and assign sequential sort_order values.
+    """
+    all_names = zf.namelist()
+
+    # Pass 1: album-level metadata.json files (name is exactly "metadata.json",
+    # not a photo sidecar like "photo.jpg.json").
+    folder_meta: dict[str, _AlbumMeta] = {}
+    for name in all_names:
+        p = PurePosixPath(name)
+        if p.name != "metadata.json":
+            continue
+        folder = str(p.parent)
+        if folder == ".":
+            continue  # root-level metadata.json — not an album
+        try:
+            data = json.loads(zf.read(name).decode("utf-8", errors="replace"))
+            raw_title = data.get("title") or ""
+            title = raw_title.strip() or p.parent.name  # fall back to folder name
+            raw_desc = data.get("description") or ""
+            description = raw_desc.strip() or None
+            folder_meta[folder] = _AlbumMeta(title=title, description=description)
+        except Exception:
+            pass
+
+    # Pass 2: per-photo sidecars → timestamps.
+    # Sidecar name pattern: "<media_filename>.json" (e.g., "photo.jpg.json").
+    # folder → {media_basename → photoTakenTime timestamp (int)}
+    folder_timestamps: dict[str, dict[str, int]] = {}
+    for name in all_names:
+        p = PurePosixPath(name)
+        if not name.lower().endswith(_SIDECAR_EXT):
+            continue
+        if p.name == "metadata.json":
+            continue  # album metadata, handled above
+        folder = str(p.parent)
+        try:
+            data = json.loads(zf.read(name).decode("utf-8", errors="replace"))
+            ts_raw = data.get("photoTakenTime", {}).get("timestamp", "0")
+            ts = int(ts_raw)
+            # Strip the trailing ".json" to get the media filename
+            media_basename = PurePosixPath(name[: -len(_SIDECAR_EXT)]).name
+            folder_timestamps.setdefault(folder, {})[media_basename] = ts
+        except Exception:
+            pass
+
+    # Assign sort orders: group media files by folder, sort by (timestamp, name).
+    folder_media: dict[str, list[str]] = {}
+    for name in all_names:
+        if _is_media_entry(name):
+            p = PurePosixPath(name)
+            folder = str(p.parent)
+            folder_media.setdefault(folder, []).append(name)
+
+    sort_orders: dict[str, int] = {}
+    for folder, media_list in folder_media.items():
+        timestamps = folder_timestamps.get(folder, {})
+
+        def _sort_key(entry: str, _ts: dict[str, int] = timestamps) -> tuple[int, str]:
+            return (_ts.get(PurePosixPath(entry).name, 0), entry)
+
+        for order, entry in enumerate(sorted(media_list, key=_sort_key)):
+            sort_orders[entry] = order
+
+    return _AlbumIndex(meta=folder_meta, sort_orders=sort_orders)
+
+
 async def _get_or_create_album(
     session: AsyncSession,
     owner_id: uuid.UUID,
     parent_id: uuid.UUID | None,
     title: str,
+    description: str | None = None,
 ) -> uuid.UUID:
     """Return the id of an existing album matching (owner, parent, title), creating it if absent."""
     if parent_id is None:
@@ -173,7 +267,7 @@ async def _get_or_create_album(
         return existing
 
     album_id = uuid.uuid4()
-    session.add(Album(id=album_id, owner_id=owner_id, parent_id=parent_id, title=title))
+    session.add(Album(id=album_id, owner_id=owner_id, parent_id=parent_id, title=title, description=description))
     await session.flush()
     return album_id
 
@@ -182,8 +276,13 @@ async def _ensure_album_path(
     session: AsyncSession,
     owner_id: uuid.UUID,
     folder_path: str,
+    album_index: _AlbumIndex | None = None,
 ) -> uuid.UUID | None:
     """Walk folder_path segments and return the deepest album id, creating albums as needed.
+
+    When *album_index* is provided and the leaf folder has a ``metadata.json`` entry in
+    the index, the leaf album is created with the metadata title and description instead
+    of the raw folder name.
 
     Examples:
         "2001"          → creates/reuses album "2001" (root), returns its id
@@ -194,8 +293,16 @@ async def _ensure_album_path(
         return None
 
     parent_id: uuid.UUID | None = None
-    for part in parts:
-        parent_id = await _get_or_create_album(session, owner_id, parent_id, part)
+    for i, part in enumerate(parts):
+        is_leaf = i == len(parts) - 1
+        if is_leaf and album_index is not None:
+            meta = album_index.meta.get(folder_path)
+            title = meta.title if meta else part
+            description = meta.description if meta else None
+        else:
+            title = part
+            description = None
+        parent_id = await _get_or_create_album(session, owner_id, parent_id, title, description)
     return parent_id
 
 
@@ -203,15 +310,16 @@ async def _link_asset_to_album(
     session: AsyncSession,
     album_id: uuid.UUID,
     asset_id: uuid.UUID,
+    sort_order: int = 0,
 ) -> None:
-    """Insert an album_assets row, ignoring duplicates."""
+    """Insert an album_assets row with the given sort_order, ignoring duplicates."""
     await session.execute(
         text(
-            "INSERT INTO album_assets (album_id, asset_id)"
-            " VALUES (:album_id, :asset_id)"
+            "INSERT INTO album_assets (album_id, asset_id, sort_order)"
+            " VALUES (:album_id, :asset_id, :sort_order)"
             " ON CONFLICT DO NOTHING"
         ),
-        {"album_id": album_id, "asset_id": asset_id},
+        {"album_id": album_id, "asset_id": asset_id, "sort_order": sort_order},
     )
 
 
@@ -261,6 +369,9 @@ async def _process(
                 media_names = [n for n in all_names if _is_media_entry(n)]
                 sidecar_set = {n.lower() for n in all_names if n.lower().endswith(_SIDECAR_EXT)}
 
+                # Pre-scan for album metadata.json and per-photo timestamps.
+                album_index = _build_album_index(zf)
+
                 job.total = len(media_names)
                 job.status = ImportJobStatus.processing
                 await session.commit()
@@ -268,7 +379,7 @@ async def _process(
 
                 for media_name in media_names:
                     await _ingest_one(
-                        session, job, owner_id, zf, media_name, sidecar_set
+                        session, job, owner_id, zf, media_name, sidecar_set, album_index
                     )
                     job.processed += 1
                     await session.commit()
@@ -293,6 +404,7 @@ async def _ingest_one(
     zf: zipfile.ZipFile,
     media_name: str,
     sidecar_set: set[str],
+    album_index: _AlbumIndex | None = None,
 ) -> None:
     """Ingest a single media file from the zip.  Errors are caught and appended to job.errors."""
     import contextlib
@@ -416,9 +528,10 @@ async def _ingest_one(
             # Create/reuse album hierarchy from the zip entry's folder path
             folder_path = _zip_folder_path(media_name)
             if folder_path is not None:
-                album_id = await _ensure_album_path(session, owner_id, folder_path)
+                album_id = await _ensure_album_path(session, owner_id, folder_path, album_index)
                 if album_id is not None:
-                    await _link_asset_to_album(session, album_id, asset_id)
+                    sort_order = album_index.sort_orders.get(media_name, 0) if album_index else 0
+                    await _link_asset_to_album(session, album_id, asset_id, sort_order)
 
             await session.flush()
 
