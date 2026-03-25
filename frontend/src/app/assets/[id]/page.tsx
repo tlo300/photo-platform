@@ -8,6 +8,21 @@ import { useParams, useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { getAsset, AssetDetail } from "@/lib/api";
 
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+function formatDuration(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
 export default function AssetDetailPage() {
   const { token, ready } = useAuth();
   const router = useRouter();
@@ -110,44 +125,79 @@ export default function AssetDetailPage() {
 
         {/* Sidebar */}
         <aside className="mt-6 w-full shrink-0 space-y-6 lg:mt-0 lg:w-72">
+
           {/* Date */}
           {capturedAt && (
             <section>
-              <h2 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-400">
-                Date
-              </h2>
+              <h2 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-400">Date</h2>
               <p className="text-sm text-gray-700">{capturedAt}</p>
             </section>
           )}
 
+          {/* Description */}
+          {asset.description && (
+            <section>
+              <h2 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-400">Description</h2>
+              <p className="text-sm text-gray-700">{asset.description}</p>
+            </section>
+          )}
+
+          {/* File info */}
+          <section>
+            <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">File</h2>
+            <dl className="space-y-1 text-sm">
+              <div className="flex justify-between">
+                <dt className="text-gray-400">Name</dt>
+                <dd className="max-w-[60%] truncate text-right text-gray-700">{asset.original_filename}</dd>
+              </div>
+              <div className="flex justify-between">
+                <dt className="text-gray-400">Type</dt>
+                <dd className="text-gray-700">{asset.mime_type}</dd>
+              </div>
+              <div className="flex justify-between">
+                <dt className="text-gray-400">Size</dt>
+                <dd className="text-gray-700">{formatFileSize(asset.file_size_bytes)}</dd>
+              </div>
+              {asset.metadata?.width_px && asset.metadata.height_px && (
+                <div className="flex justify-between">
+                  <dt className="text-gray-400">Dimensions</dt>
+                  <dd className="text-gray-700">{asset.metadata.width_px} × {asset.metadata.height_px}</dd>
+                </div>
+              )}
+              {asset.metadata?.duration_seconds && (
+                <div className="flex justify-between">
+                  <dt className="text-gray-400">Duration</dt>
+                  <dd className="text-gray-700">{formatDuration(asset.metadata.duration_seconds)}</dd>
+                </div>
+              )}
+            </dl>
+          </section>
+
           {/* Camera */}
           {asset.metadata && (asset.metadata.make || asset.metadata.model) && (
             <section>
-              <h2 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-400">
-                Camera
-              </h2>
-              <p className="text-sm text-gray-700">
-                {[asset.metadata.make, asset.metadata.model].filter(Boolean).join(" ")}
-              </p>
-              {asset.metadata.width_px && asset.metadata.height_px && (
-                <p className="mt-0.5 text-xs text-gray-400">
-                  {asset.metadata.width_px} × {asset.metadata.height_px}
-                </p>
-              )}
-              {asset.metadata.duration_seconds && (
-                <p className="mt-0.5 text-xs text-gray-400">
-                  {Math.round(asset.metadata.duration_seconds)}s
-                </p>
-              )}
+              <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">Camera</h2>
+              <dl className="space-y-1 text-sm">
+                {asset.metadata.make && (
+                  <div className="flex justify-between">
+                    <dt className="text-gray-400">Make</dt>
+                    <dd className="text-gray-700">{asset.metadata.make}</dd>
+                  </div>
+                )}
+                {asset.metadata.model && (
+                  <div className="flex justify-between">
+                    <dt className="text-gray-400">Model</dt>
+                    <dd className="text-gray-700">{asset.metadata.model}</dd>
+                  </div>
+                )}
+              </dl>
             </section>
           )}
 
           {/* Tags */}
           {asset.tags.length > 0 && (
             <section>
-              <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
-                Tags
-              </h2>
+              <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">Tags</h2>
               <div className="flex flex-wrap gap-2">
                 {asset.tags.map((tag) => (
                   <span
@@ -164,12 +214,15 @@ export default function AssetDetailPage() {
             </section>
           )}
 
-          {/* GPS map */}
+          {/* Location */}
           {asset.location && (
             <section>
-              <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">
-                Location
-              </h2>
+              <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">Location</h2>
+              {(asset.location.display_name || asset.location.country) && (
+                <p className="mb-2 text-sm text-gray-700">
+                  {asset.location.display_name ?? asset.location.country}
+                </p>
+              )}
               <div className="overflow-hidden rounded border">
                 <iframe
                   title="Map"
@@ -179,9 +232,18 @@ export default function AssetDetailPage() {
                   className="border-0"
                 />
               </div>
-              <p className="mt-1 text-xs text-gray-400">
-                {asset.location.latitude.toFixed(5)}, {asset.location.longitude.toFixed(5)}
-              </p>
+              <dl className="mt-2 space-y-1 text-xs text-gray-400">
+                <div className="flex justify-between">
+                  <dt>Coordinates</dt>
+                  <dd>{asset.location.latitude.toFixed(5)}, {asset.location.longitude.toFixed(5)}</dd>
+                </div>
+                {asset.location.altitude_metres && (
+                  <div className="flex justify-between">
+                    <dt>Altitude</dt>
+                    <dd>{Math.round(asset.location.altitude_metres)} m</dd>
+                  </div>
+                )}
+              </dl>
             </section>
           )}
         </aside>

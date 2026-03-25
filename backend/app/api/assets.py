@@ -66,6 +66,9 @@ class AssetMetadata(BaseModel):
 class AssetLocation(BaseModel):
     latitude: float
     longitude: float
+    altitude_metres: float | None
+    display_name: str | None
+    country: str | None
 
 
 class AssetTagItem(BaseModel):
@@ -78,6 +81,8 @@ class AssetDetail(BaseModel):
     original_filename: str
     mime_type: str
     captured_at: datetime | None
+    file_size_bytes: int
+    description: str | None
     full_url: str
     thumbnail_url: str | None
     metadata: AssetMetadata | None
@@ -291,10 +296,13 @@ async def get_asset(
     meta_stmt = select(MediaMetadata).where(MediaMetadata.asset_id == asset_id)
     meta: MediaMetadata | None = await session.scalar(meta_stmt)
 
-    # Location — extract lat/lng from the PostGIS point.
+    # Location — extract lat/lng from the PostGIS point plus stored fields.
     loc_stmt = select(
         ST_Y(Location.point).label("latitude"),
         ST_X(Location.point).label("longitude"),
+        Location.altitude_metres,
+        Location.display_name,
+        Location.country,
     ).where(Location.asset_id == asset_id)
     loc_row = (await session.execute(loc_stmt)).one_or_none()
 
@@ -321,6 +329,8 @@ async def get_asset(
         original_filename=asset.original_filename,
         mime_type=asset.mime_type,
         captured_at=asset.captured_at,
+        file_size_bytes=asset.file_size_bytes,
+        description=asset.description,
         full_url=full_url,
         thumbnail_url=_thumbnail_url(user_id, asset.id, asset.thumbnail_ready),
         metadata=AssetMetadata(
@@ -333,6 +343,9 @@ async def get_asset(
         location=AssetLocation(
             latitude=float(loc_row.latitude),
             longitude=float(loc_row.longitude),
+            altitude_metres=loc_row.altitude_metres,
+            display_name=loc_row.display_name,
+            country=loc_row.country,
         ) if loc_row is not None else None,
         tags=[AssetTagItem(name=row.name, source=row.source) for row in tag_rows],
     )

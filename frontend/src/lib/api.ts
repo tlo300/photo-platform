@@ -246,6 +246,9 @@ export interface AssetMetadata {
 export interface AssetLocation {
   latitude: number;
   longitude: number;
+  altitude_metres: number | null;
+  display_name: string | null;
+  country: string | null;
 }
 
 export interface AssetTagItem {
@@ -258,6 +261,8 @@ export interface AssetDetail {
   original_filename: string;
   mime_type: string;
   captured_at: string | null;
+  file_size_bytes: number;
+  description: string | null;
   full_url: string;
   thumbnail_url: string | null;
   metadata: AssetMetadata | null;

@@ -35,6 +35,7 @@ class StorageService:
         protocol = "https" if settings.storage_use_ssl else "http"
         endpoint_url = f"{protocol}://{settings.storage_endpoint}"
 
+        self._internal_url = endpoint_url
         self._bucket = settings.storage_bucket
         self._client = boto3.client(
             "s3",
@@ -110,6 +111,8 @@ class StorageService:
             raise StorageError(
                 f"Presigned URL generation failed for key {key!r}: {exc}"
             ) from exc
+        if settings.storage_public_url:
+            url = url.replace(self._internal_url, settings.storage_public_url, 1)
         return url
 
     def delete(self, key: str) -> None:
