@@ -67,6 +67,11 @@ class AssetMetadata(BaseModel):
     width_px: int | None
     height_px: int | None
     duration_seconds: float | None
+    iso: int | None
+    aperture: float | None
+    shutter_speed: float | None
+    focal_length: float | None
+    flash: bool | None
 
 
 class AssetLocation(BaseModel):
@@ -460,6 +465,11 @@ async def get_asset(
             width_px=meta.width_px,
             height_px=meta.height_px,
             duration_seconds=meta.duration_seconds,
+            iso=meta.iso,
+            aperture=meta.aperture,
+            shutter_speed=meta.shutter_speed,
+            focal_length=meta.focal_length,
+            flash=meta.flash,
         ) if meta is not None else None,
         location=AssetLocation(
             latitude=float(loc_row.latitude),

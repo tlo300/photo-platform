@@ -15,6 +15,12 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
+function formatShutterSpeed(seconds: number): string {
+  if (seconds >= 1) return `${seconds}s`;
+  const denom = Math.round(1 / seconds);
+  return `1/${denom}`;
+}
+
 function formatDuration(seconds: number): string {
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
@@ -174,7 +180,7 @@ export default function AssetDetailPage() {
           </section>
 
           {/* Camera */}
-          {asset.metadata && (asset.metadata.make || asset.metadata.model) && (
+          {asset.metadata && (asset.metadata.make || asset.metadata.model || asset.metadata.iso != null || asset.metadata.aperture != null) && (
             <section>
               <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">Camera</h2>
               <dl className="space-y-1 text-sm">
@@ -188,6 +194,36 @@ export default function AssetDetailPage() {
                   <div className="flex justify-between">
                     <dt className="text-gray-400">Model</dt>
                     <dd className="text-gray-700">{asset.metadata.model}</dd>
+                  </div>
+                )}
+                {asset.metadata.iso != null && (
+                  <div className="flex justify-between">
+                    <dt className="text-gray-400">ISO</dt>
+                    <dd className="text-gray-700">{asset.metadata.iso}</dd>
+                  </div>
+                )}
+                {asset.metadata.aperture != null && (
+                  <div className="flex justify-between">
+                    <dt className="text-gray-400">Aperture</dt>
+                    <dd className="text-gray-700">f/{asset.metadata.aperture.toFixed(1)}</dd>
+                  </div>
+                )}
+                {asset.metadata.shutter_speed != null && (
+                  <div className="flex justify-between">
+                    <dt className="text-gray-400">Shutter</dt>
+                    <dd className="text-gray-700">{formatShutterSpeed(asset.metadata.shutter_speed)}</dd>
+                  </div>
+                )}
+                {asset.metadata.focal_length != null && (
+                  <div className="flex justify-between">
+                    <dt className="text-gray-400">Focal length</dt>
+                    <dd className="text-gray-700">{asset.metadata.focal_length.toFixed(0)} mm</dd>
+                  </div>
+                )}
+                {asset.metadata.flash != null && (
+                  <div className="flex justify-between">
+                    <dt className="text-gray-400">Flash</dt>
+                    <dd className="text-gray-700">{asset.metadata.flash ? "Fired" : "No"}</dd>
                   </div>
                 )}
               </dl>
