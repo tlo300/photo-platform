@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 15
     refresh_token_expire_days: int = 7
 
+    # Local folder import — paths submitted by users must be inside this directory
+    import_base_dir: str = "/import"
+
     # Application
     allow_open_registration: bool = False
     max_upload_size_bytes: int = 5_368_709_120  # 5 GiB

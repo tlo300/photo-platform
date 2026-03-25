@@ -31,7 +31,8 @@ class ImportJob(Base):
         nullable=False,
         server_default="pending",
     )
-    zip_key: Mapped[str] = mapped_column(String(1024), nullable=False)
+    zip_key: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    folder_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     total: Mapped[int | None] = mapped_column(Integer, nullable=True)
     processed: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=text("0")
