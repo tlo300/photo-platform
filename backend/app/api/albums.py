@@ -39,6 +39,7 @@ _THUMBNAIL_KEY_TEMPLATE = "{user_id}/thumbnails/{asset_id}/thumb.webp"
 class AlbumResponse(BaseModel):
     id: uuid.UUID
     title: str
+    description: str | None
     parent_id: uuid.UUID | None
     cover_asset_id: uuid.UUID | None
     cover_thumbnail_url: str | None
@@ -56,11 +57,13 @@ class AlbumDetail(AlbumResponse):
 
 class CreateAlbumRequest(BaseModel):
     title: str
+    description: str | None = None
     parent_id: uuid.UUID | None = None
 
 
 class UpdateAlbumRequest(BaseModel):
     title: str | None = None
+    description: str | None = None
     cover_asset_id: uuid.UUID | None = None
 
 
@@ -110,7 +113,7 @@ async def create_album(
     session: AsyncSession = Depends(get_authed_session),
 ) -> AlbumResponse:
     """Create a new album owned by the authenticated user."""
-    album = Album(owner_id=user_id, title=body.title, parent_id=body.parent_id)
+    album = Album(owner_id=user_id, title=body.title, description=body.description, parent_id=body.parent_id)
     session.add(album)
     await session.flush()
     await session.refresh(album)
@@ -118,6 +121,7 @@ async def create_album(
     return AlbumResponse(
         id=album.id,
         title=album.title,
+        description=album.description,
         parent_id=album.parent_id,
         cover_asset_id=album.cover_asset_id,
         cover_thumbnail_url=None,
@@ -158,6 +162,7 @@ async def list_albums(
             AlbumResponse(
                 id=album.id,
                 title=album.title,
+                description=album.description,
                 parent_id=album.parent_id,
                 cover_asset_id=album.cover_asset_id,
                 cover_thumbnail_url=_cover_thumbnail_url(user_id, cover_id),
@@ -191,6 +196,7 @@ async def get_album(
     return AlbumDetail(
         id=album.id,
         title=album.title,
+        description=album.description,
         parent_id=album.parent_id,
         cover_asset_id=album.cover_asset_id,
         cover_thumbnail_url=_cover_thumbnail_url(user_id, cover_id),
@@ -211,6 +217,8 @@ async def update_album(
 
     if body.title is not None:
         album.title = body.title
+    if body.description is not None:
+        album.description = body.description
     if body.cover_asset_id is not None:
         # Verify the asset exists and belongs to this user.
         asset = await session.scalar(
@@ -232,6 +240,7 @@ async def update_album(
     return AlbumResponse(
         id=album.id,
         title=album.title,
+        description=album.description,
         parent_id=album.parent_id,
         cover_asset_id=album.cover_asset_id,
         cover_thumbnail_url=_cover_thumbnail_url(user_id, album.cover_asset_id),

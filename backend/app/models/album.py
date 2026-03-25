@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import DateTime, ForeignKey, Integer, PrimaryKeyConstraint, String, text
+from sqlalchemy import DateTime, ForeignKey, Integer, PrimaryKeyConstraint, String, Text, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -22,6 +22,7 @@ class Album(Base):
         nullable=True,
     )
     title: Mapped[str] = mapped_column(String(512), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
     cover_asset_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("media_assets.id", ondelete="SET NULL"),
