@@ -191,6 +191,7 @@ def _insert_asset(
     mime_type: str = "image/jpeg",
     captured_at: datetime | None = None,
     with_location: bool = False,
+    thumbnail_ready: bool = False,
 ) -> str:
     """Insert a media_asset (and optionally a location row); return the asset UUID."""
     asset_id = str(uuid.uuid4())
@@ -202,8 +203,8 @@ def _insert_asset(
             text(
                 "INSERT INTO media_assets"
                 " (id, owner_id, original_filename, mime_type, storage_key,"
-                "  file_size_bytes, checksum, captured_at)"
-                " VALUES (:id, :owner_id, :fn, :mime, :key, :size, :chk, :cat)"
+                "  file_size_bytes, checksum, captured_at, thumbnail_ready)"
+                " VALUES (:id, :owner_id, :fn, :mime, :key, :size, :chk, :cat, :thumb_ready)"
             ),
             {
                 "id": asset_id,
@@ -214,6 +215,7 @@ def _insert_asset(
                 "size": 1024,
                 "chk": checksum,
                 "cat": captured_at,
+                "thumb_ready": thumbnail_ready,
             },
         )
 
@@ -270,6 +272,8 @@ def test_data(migrator_engine, user_token, other_user_token):
     photo_t3 = _insert_asset(migrator_engine, user_id, "photo_t3.jpg", captured_at=t3)
     video_t2 = _insert_asset(migrator_engine, user_id, "video_t2.mp4", mime_type="video/mp4", captured_at=t2)
     no_date  = _insert_asset(migrator_engine, user_id, "no_date.jpg")   # captured_at IS NULL
+    # thumb_ready has thumbnail_ready=True so the URL generation path is exercised
+    thumb_ready = _insert_asset(migrator_engine, user_id, "thumb_ready.jpg", captured_at=t3, thumbnail_ready=True)
     other_asset = _insert_asset(migrator_engine, other_user_id, "other.jpg", captured_at=t2)
 
     return {
@@ -280,6 +284,7 @@ def test_data(migrator_engine, user_token, other_user_token):
         "photo_t3": photo_t3,
         "video_t2": video_t2,
         "no_date": no_date,
+        "thumb_ready": thumb_ready,
         "other_asset": other_asset,
         # Expose timestamps for filter tests
         "t1": t1,
@@ -306,8 +311,8 @@ async def test_basic_timeline_returns_own_assets(user_token, test_data):
     assert "items" in body
     assert "next_cursor" in body
     ids = {a["id"] for a in body["items"]}
-    # All five user assets should be present (may span pages; just check they appear)
-    for key in ("photo_t1", "photo_t2", "photo_t3", "video_t2", "no_date"):
+    # All user assets should be present (may span pages; just check they appear)
+    for key in ("photo_t1", "photo_t2", "photo_t3", "video_t2", "no_date", "thumb_ready"):
         assert test_data[key] in ids, f"{key} missing from timeline"
     # Other user's asset must not appear
     assert test_data["other_asset"] not in ids
@@ -359,8 +364,8 @@ async def test_cursor_pagination_no_gaps_or_duplicates(user_token, test_data):
 
     # No duplicates
     assert len(all_ids) == len(set(all_ids))
-    # All five assets are present
-    for key in ("photo_t1", "photo_t2", "photo_t3", "video_t2", "no_date"):
+    # All user assets are present
+    for key in ("photo_t1", "photo_t2", "photo_t3", "video_t2", "no_date", "thumb_ready"):
         assert test_data[key] in all_ids
 
 
@@ -476,6 +481,7 @@ async def test_media_type_photo(user_token, test_data):
     assert test_data["photo_t2"] in ids
     assert test_data["photo_t3"] in ids
     assert test_data["no_date"] in ids
+    assert test_data["thumb_ready"] in ids
     assert test_data["video_t2"] not in ids
 
 
@@ -561,7 +567,7 @@ async def test_rls_isolation(user_token, other_user_token, test_data):
 
 @pytest.mark.asyncio
 async def test_thumbnail_url_present(user_token, test_data):
-    """Each item has a thumbnail_url field (string or null)."""
+    """Each item has thumbnail_url and thumbnail_ready fields."""
     with patch("app.api.assets.storage_service") as mock_storage:
         mock_storage.generate_presigned_url.return_value = "https://example.com/thumb"
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -570,11 +576,37 @@ async def test_thumbnail_url_present(user_token, test_data):
     assert resp.status_code == 200, resp.text
     for item in resp.json()["items"]:
         assert "thumbnail_url" in item
+        assert "thumbnail_ready" in item
+
+
+@pytest.mark.asyncio
+async def test_thumbnail_url_null_when_not_ready(user_token, test_data):
+    """thumbnail_url is null when thumbnail_ready=false, non-null when thumbnail_ready=true."""
+    with patch("app.api.assets.storage_service") as mock_storage:
+        mock_storage.generate_presigned_url.return_value = "https://example.com/thumb"
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.get(
+                ASSETS_URL,
+                params={"limit": 200},
+                headers={"Authorization": f"Bearer {user_token}"},
+            )
+
+    assert resp.status_code == 200, resp.text
+    items_by_id = {a["id"]: a for a in resp.json()["items"]}
+    # Assets without thumbnail_ready must have null thumbnail_url
+    for key in ("photo_t1", "photo_t2", "photo_t3", "video_t2", "no_date"):
+        item = items_by_id[test_data[key]]
+        assert item["thumbnail_ready"] is False
+        assert item["thumbnail_url"] is None
+    # The asset with thumbnail_ready=True must have a URL
+    ready_item = items_by_id[test_data["thumb_ready"]]
+    assert ready_item["thumbnail_ready"] is True
+    assert ready_item["thumbnail_url"] == "https://example.com/thumb"
 
 
 @pytest.mark.asyncio
 async def test_thumbnail_url_scoped_to_user(user_token, test_data):
-    """Presigned URL is generated with the user's prefix (owner check)."""
+    """Presigned URL key uses thumbnails/{asset_id}/thumb.webp under the user's prefix."""
     calls = []
 
     def _fake_presign(user_id: str, key: str, **kwargs) -> str:
@@ -591,9 +623,14 @@ async def test_thumbnail_url_scoped_to_user(user_token, test_data):
             )
 
     assert resp.status_code == 200
+    # Only the thumb_ready asset triggers a presigned URL call
+    assert len(calls) >= 1
     for user_id_arg, key_arg in calls:
-        assert key_arg.startswith(f"{user_id_arg}/"), (
-            f"Thumbnail key {key_arg!r} does not start with user prefix {user_id_arg!r}"
+        assert key_arg.startswith(f"{user_id_arg}/thumbnails/"), (
+            f"Thumbnail key {key_arg!r} does not match expected pattern"
+        )
+        assert key_arg.endswith("/thumb.webp"), (
+            f"Thumbnail key {key_arg!r} does not end with /thumb.webp"
         )
 
 

@@ -29,10 +29,9 @@ _GOOGLE_PEOPLE_SOURCE = "google_people"
 _DEFAULT_PAGE_SIZE = 50
 _MAX_PAGE_SIZE = 200
 
-# Thumbnail key convention: {user_id}/{asset_id}/thumbnail.jpg
-# Objects are created by the thumbnail worker (issue #23). The presigned URL
-# is generated unconditionally so the frontend can use it as soon as #23 runs.
-_THUMBNAIL_SUFFIX = "thumbnail.jpg"
+# Thumbnail key convention: {user_id}/thumbnails/{asset_id}/thumb.webp
+# Matches the path written by the thumbnail worker (issue #23).
+_THUMBNAIL_KEY_TEMPLATE = "{user_id}/thumbnails/{asset_id}/thumb.webp"
 
 
 # ---------------------------------------------------------------------------
@@ -45,6 +44,7 @@ class AssetItem(BaseModel):
     original_filename: str
     mime_type: str
     captured_at: datetime | None
+    thumbnail_ready: bool
     thumbnail_url: str | None
 
 
@@ -86,9 +86,15 @@ def _decode_cursor(cursor: str) -> tuple[datetime | None, uuid.UUID]:
 # ---------------------------------------------------------------------------
 
 
-def _thumbnail_url(user_id: uuid.UUID, asset_id: uuid.UUID) -> str | None:
-    """Return a presigned URL for the asset's thumbnail, or None on error."""
-    key = f"{user_id}/{asset_id}/{_THUMBNAIL_SUFFIX}"
+def _thumbnail_url(user_id: uuid.UUID, asset_id: uuid.UUID, thumbnail_ready: bool) -> str | None:
+    """Return a presigned URL for the asset's thumbnail.
+
+    Returns None when the thumbnail has not been generated yet (thumbnail_ready=False)
+    or if the presigned URL cannot be created.
+    """
+    if not thumbnail_ready:
+        return None
+    key = _THUMBNAIL_KEY_TEMPLATE.format(user_id=user_id, asset_id=asset_id)
     try:
         return storage_service.generate_presigned_url(str(user_id), key)
     except StorageError:
@@ -220,7 +226,8 @@ async def list_assets(
             original_filename=asset.original_filename,
             mime_type=asset.mime_type,
             captured_at=asset.captured_at,
-            thumbnail_url=_thumbnail_url(user_id, asset.id),
+            thumbnail_ready=asset.thumbnail_ready,
+            thumbnail_url=_thumbnail_url(user_id, asset.id, asset.thumbnail_ready),
         )
         for asset in page
     ]
