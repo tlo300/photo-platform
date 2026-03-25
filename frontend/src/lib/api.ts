@@ -241,6 +241,11 @@ export interface AssetMetadata {
   width_px: number | null;
   height_px: number | null;
   duration_seconds: number | null;
+  iso: number | null;
+  aperture: number | null;
+  shutter_speed: number | null;
+  focal_length: number | null;
+  flash: boolean | null;
 }
 
 export interface AssetLocation {

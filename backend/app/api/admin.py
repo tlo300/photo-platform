@@ -407,3 +407,55 @@ async def list_invitations(
         page_size=page_size,
         items=[InvitationOut.model_validate(r) for r in rows],
     )
+
+
+# ---------------------------------------------------------------------------
+# POST /admin/backfill-metadata
+# ---------------------------------------------------------------------------
+
+
+class BackfillMetadataResponse(BaseModel):
+    enqueued: int
+    """Number of user-level backfill tasks enqueued."""
+
+
+@router.post(
+    "/backfill-metadata",
+    response_model=BackfillMetadataResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def backfill_metadata(
+    user_id: uuid.UUID | None = Query(
+        default=None,
+        description="Limit backfill to a specific user. Omit to enqueue for all users.",
+    ),
+    admin_id: uuid.UUID = Depends(get_admin_user),
+    session: AsyncSession = Depends(get_session),
+) -> BackfillMetadataResponse:
+    """Enqueue metadata backfill tasks to re-extract EXIF and video metadata.
+
+    Dispatches one metadata.backfill_user Celery task per user (or one task
+    when user_id is supplied).  Each user task then fans out one
+    metadata.backfill_asset task per asset owned by that user.
+
+    Idempotent — safe to call multiple times.  Returns the number of
+    user-level tasks enqueued.
+    """
+    from app.worker.metadata_tasks import backfill_user_metadata
+
+    if user_id is not None:
+        user = await session.scalar(select(User).where(User.id == user_id))
+        if user is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found.",
+            )
+        user_ids = [user_id]
+    else:
+        rows = await session.scalars(select(User.id))
+        user_ids = list(rows)
+
+    for uid in user_ids:
+        backfill_user_metadata.delay(str(uid))
+
+    return BackfillMetadataResponse(enqueued=len(user_ids))
