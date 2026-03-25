@@ -78,11 +78,26 @@ When making a non-obvious technical decision, create docs/decisions/NNN-short-ti
 Update this section at the end of every working session.
 
 ```
-Active milestone : 4 – Photo library and browsing
-Last completed  : #92 Extend search to EXIF metadata fields (PR pending, 2026-03-25)
+Active milestone : 5 – Albums and organisation
+Last completed  : #27 Albums API CRUD (PR pending, 2026-03-26)
 In progress     : (none)
 Blocked         : (none)
 ```
+
+### Handoff — 2026-03-26 (#27 Albums API CRUD)
+**Completed:**
+- Migration 0018: `sort_order INTEGER NOT NULL DEFAULT 0` on `album_assets` + index `ix_album_assets_album_sort`
+- `AlbumAsset` model: `sort_order` field added
+- `POST/GET/PATCH/DELETE /albums` and `POST/DELETE /albums/{id}/assets` and `PUT /albums/{id}/assets/order`
+- `GET /albums` includes `cover_thumbnail_url` (from `cover_asset_id` or first asset by sort_order)
+- `DELETE /albums/{id}` removes album only — assets untouched
+- 16 integration tests, all passing
+
+**Gotchas:**
+- `album_assets` uses a composite PK (album_id, asset_id); SQLAlchemy `delete()` returns rowcount correctly for detecting missing rows
+- Reorder endpoint requires the caller to supply the complete current asset list — partial reorders are rejected 400
+
+**Suggested next step:** Open PR for #27, then move to #29 Albums UI or #28 Takeout album import.
 
 ### Handoff — 2026-03-25 (#92 Extend search to EXIF metadata fields)
 **Completed:**
@@ -231,7 +246,7 @@ Update the status column as issues progress.
 | #26   | Basic search                             | 4         | pr-open |
 | #88   | Metadata backfill                        | 4         | pr-open |
 | #92   | Extend search to EXIF metadata fields    | 4         | pr-open |
-| #27   | Albums API (CRUD)                        | 5         | backlog |
+| #27   | Albums API (CRUD)                        | 5         | pr-open |
 | #28   | Google Takeout album import              | 5         | backlog |
 | #29   | Albums UI                                | 5         | backlog |
 | #30   | Production Docker Compose config         | 6         | backlog |

@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import DateTime, ForeignKey, PrimaryKeyConstraint, String, text
+from sqlalchemy import DateTime, ForeignKey, Integer, PrimaryKeyConstraint, String, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -42,3 +42,4 @@ class AlbumAsset(Base):
     asset_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("media_assets.id", ondelete="CASCADE"), nullable=False
     )
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
