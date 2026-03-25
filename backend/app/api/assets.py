@@ -7,8 +7,9 @@ Endpoints:
                          Cursor-based pagination; each response includes a next_cursor field.
                          When near is specified, results are ordered by distance and next_cursor
                          is always null (no cursor pagination for geo queries).
-  GET /assets/search   — full-text search across description, tag names, and locality.
-                         Ordered by relevance then captured_at DESC. Empty q returns first page.
+  GET /assets/search   — full-text search across description, tag names, locality, and camera
+                         make/model. Ordered by relevance then captured_at DESC. Empty q returns
+                         first page.
   GET /assets/{id}     — full detail for a single asset: presigned URL, metadata, location, tags.
 """
 
@@ -319,12 +320,12 @@ async def list_assets(
 
 @router.get("/search", response_model=PagedAssetResponse)
 async def search_assets(
-    q: str = Query("", description="Search query (description, tags, locality)"),
+    q: str = Query("", description="Search query (description, tags, locality, camera make/model)"),
     limit: int = Query(_DEFAULT_PAGE_SIZE, ge=1, le=_MAX_PAGE_SIZE, description="Max results"),
     user_id: uuid.UUID = Depends(get_current_user),
     session: AsyncSession = Depends(get_authed_session),
 ) -> PagedAssetResponse:
-    """Full-text search across asset descriptions, tag names, and locality (city/country).
+    """Full-text search across asset descriptions, tag names, locality, and camera make/model.
 
     Uses PostgreSQL websearch_to_tsquery so users can type natural phrases.
     Results are ordered by relevance (ts_rank) then captured_at DESC.
@@ -337,6 +338,7 @@ async def search_assets(
     stmt = (
         select(MediaAsset)
         .outerjoin(Location, Location.asset_id == MediaAsset.id)
+        .outerjoin(MediaMetadata, MediaMetadata.asset_id == MediaAsset.id)
         .where(MediaAsset.owner_id == user_id)
     )
 
@@ -360,16 +362,21 @@ async def search_assets(
             "simple",
             func.concat_ws(" ", Location.display_name, Location.country),
         )
+        camera_vec = func.to_tsvector(
+            "simple",
+            func.coalesce(MediaMetadata.make, "") + " " + func.coalesce(MediaMetadata.model, ""),
+        )
 
         stmt = stmt.where(
             or_(
                 desc_vec.op("@@")(func.websearch_to_tsquery("english", q)),
                 tag_match,
                 loc_vec.op("@@")(tsq),
+                camera_vec.op("@@")(tsq),
             )
         )
 
-        rank = func.ts_rank(desc_vec.op("||")(loc_vec), tsq)
+        rank = func.ts_rank(desc_vec.op("||")(loc_vec).op("||")(camera_vec), tsq)
         stmt = stmt.order_by(
             rank.desc(),
             MediaAsset.captured_at.desc().nulls_last(),

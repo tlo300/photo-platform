@@ -168,7 +168,7 @@ export default function Home() {
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search by description, tag, or location…"
+          placeholder="Search by description, tag, location, or camera…"
           className="w-full rounded-lg border border-gray-200 bg-gray-50 px-4 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-gray-400 focus:bg-white focus:outline-none"
         />
       </div>
