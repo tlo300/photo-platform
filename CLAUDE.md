@@ -79,7 +79,7 @@ Update this section at the end of every working session.
 
 ```
 Active milestone : 3 – Google Takeout import pipeline
-Last completed  : #74 Local folder import (pr-open)
+Last completed  : #75 Preserve Takeout folder structure as albums (pr-open)
 In progress     : (none)
 Blocked         : (none)
 ```
@@ -115,6 +115,7 @@ Update the status column as issues progress.
 | #42   | HEIC file support in EXIF extraction     | 3         | pr-open |
 | #44   | People tags import and storage           | 3         | pr-open |
 | #74   | Local folder import                      | 3         | pr-open |
+| #75   | Preserve Takeout folder structure as albums | 3      | pr-open |
 | #22   | Library API (paginated timeline)         | 4         | backlog |
 | #23   | Thumbnail generation worker              | 4         | backlog |
 | #24   | Timeline grid UI                         | 4         | backlog |
