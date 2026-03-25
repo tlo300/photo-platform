@@ -79,10 +79,29 @@ Update this section at the end of every working session.
 
 ```
 Active milestone : 5 – Albums and organisation
-Last completed  : #27 Albums API CRUD (PR pending, 2026-03-26)
+Last completed  : #28 Google Takeout album import (PR #111, 2026-03-26)
 In progress     : (none)
 Blocked         : (none)
 ```
+
+### Handoff — 2026-03-26 (#28 Google Takeout album import)
+**Completed:**
+- Migration 0019: `description TEXT NULL` on `albums`
+- Album model + all API endpoints now expose `description` (create/update/list/detail)
+- `_build_album_index(zf)`: pre-scans zip for folder-level `metadata.json` (album title/description) and per-photo `photoTakenTime` timestamps → sort order
+- `_get_or_create_album`: accepts `description`, stored on first creation only (not overwritten on reimport)
+- `_link_asset_to_album`: accepts `sort_order`; written into `album_assets.sort_order`
+- `_ensure_album_path`: uses `AlbumIndex.meta` for the leaf folder's title/description; intermediate path segments keep their raw names
+- `_process`: builds album index once before per-file loop, passes it to `_ingest_one`
+- 12 new tests (6 unit, 6 integration); all 43 album+takeout tests pass
+
+**Gotchas:**
+- Album-level `metadata.json` (name exactly `metadata.json`) vs photo sidecars (`photo.jpg.json`) — distinguished by filename, not content
+- Sort order uses `photoTakenTime.timestamp` from photo sidecars; files without sidecars fall back to alphabetical order
+- `_get_or_create_album` matches on `(owner_id, title, parent_id)` — if a previous import created albums by folder name, reimporting after this feature adds new albums with the metadata title (known limitation; no auto-merge)
+- Folder import path (`_ingest_one_from_path`) intentionally unchanged — no album metadata.json in generic folder imports
+
+**Suggested next step:** #29 Albums UI.
 
 ### Handoff — 2026-03-26 (#27 Albums API CRUD)
 **Completed:**
@@ -247,7 +266,7 @@ Update the status column as issues progress.
 | #88   | Metadata backfill                        | 4         | pr-open |
 | #92   | Extend search to EXIF metadata fields    | 4         | pr-open |
 | #27   | Albums API (CRUD)                        | 5         | pr-open |
-| #28   | Google Takeout album import              | 5         | backlog |
+| #28   | Google Takeout album import              | 5         | pr-open |
 | #29   | Albums UI                                | 5         | backlog |
 | #30   | Production Docker Compose config         | 6         | backlog |
 | #31   | S3-compatible storage abstraction        | 6         | backlog |
