@@ -5,12 +5,18 @@ POST /import/takeout
     creates an ImportJob row, enqueues the Celery task, and returns immediately
     with the job_id.
 
+POST /import/folder
+    Accepts a JSON body with a folder_path pointing to a pre-extracted Takeout
+    directory on the server.  Creates an ImportJob row and enqueues the folder
+    walk task.  The path must be inside the configured import_base_dir.
+
 GET /import/jobs/{job_id}
     Returns progress for a job owned by the authenticated user.
     Returns 404 if the job does not exist or belongs to a different user.
 """
 
 import uuid
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 from pydantic import BaseModel
@@ -21,7 +27,7 @@ from app.core.dependencies import get_current_user
 from app.db import get_authed_session
 from app.models.import_job import ImportJob, ImportJobStatus
 from app.services.storage import StorageError, storage_service
-from app.worker.takeout_tasks import process_takeout_zip
+from app.worker.takeout_tasks import process_takeout_folder, process_takeout_zip
 
 router = APIRouter(prefix="/import", tags=["import"])
 
@@ -36,6 +42,10 @@ _STAGING_KEY_TMPL = "{user_id}/import/{job_id}/source.zip"
 
 class StartImportResponse(BaseModel):
     job_id: str
+
+
+class FolderImportRequest(BaseModel):
+    folder_path: str
 
 
 class ImportJobResponse(BaseModel):
@@ -134,6 +144,59 @@ async def start_takeout_import(
     await session.commit()
 
     process_takeout_zip.delay(str(job_id), str(user_id))
+
+    return StartImportResponse(job_id=str(job_id))
+
+
+@router.post(
+    "/folder",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=StartImportResponse,
+)
+async def start_folder_import(
+    body: FolderImportRequest,
+    user_id: uuid.UUID = Depends(get_current_user),
+    session: AsyncSession = Depends(get_authed_session),
+) -> StartImportResponse:
+    """Queue a local folder for background ingestion.
+
+    The folder must be inside the server's configured import base directory
+    (``IMPORT_BASE_DIR``, default ``/import``).  Processing is identical to
+    the zip pipeline — duplicates are skipped, progress is reported via
+    ``GET /import/jobs/{job_id}``.
+    """
+    try:
+        resolved = Path(body.folder_path).resolve()
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid folder path.",
+        )
+
+    base = Path(settings.import_base_dir).resolve()
+    if not str(resolved).startswith(str(base)):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"folder_path must be inside the import base directory ({base}).",
+        )
+
+    if not resolved.exists() or not resolved.is_dir():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="folder_path does not exist or is not a directory.",
+        )
+
+    job_id = uuid.uuid4()
+    job = ImportJob(
+        id=job_id,
+        owner_id=user_id,
+        status=ImportJobStatus.pending,
+        folder_path=str(resolved),
+    )
+    session.add(job)
+    await session.commit()
+
+    process_takeout_folder.delay(str(job_id), str(user_id))
 
     return StartImportResponse(job_id=str(job_id))
 

@@ -405,3 +405,220 @@ async def _get_zip_key(job_id: uuid.UUID, owner_id: uuid.UUID) -> str | None:
             return job.zip_key if job else None
     finally:
         await engine.dispose()
+
+
+# ---------------------------------------------------------------------------
+# Folder import — async core
+# ---------------------------------------------------------------------------
+
+
+def _is_media_path(p: Path) -> bool:
+    """Return True if *p* looks like a media file (not a sidecar, not hidden)."""
+    name = p.name
+    if name.startswith("."):
+        return False
+    return _is_media_entry(name)
+
+
+def _mtime_from_path(p: Path) -> datetime:
+    """Return the file modification time as a UTC datetime."""
+    return datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc)
+
+
+async def _run_folder_import(
+    job_id: uuid.UUID, owner_id: uuid.UUID, folder_path: str
+) -> None:
+    """Walk *folder_path* and ingest every media file, updating the ImportJob."""
+    engine = create_async_engine(settings.database_url, pool_pre_ping=True)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    try:
+        async with factory() as session:
+            await _set_rls(session, owner_id)
+            await _process_folder(session, job_id, owner_id, Path(folder_path))
+    finally:
+        await engine.dispose()
+
+
+async def _process_folder(
+    session: AsyncSession,
+    job_id: uuid.UUID,
+    owner_id: uuid.UUID,
+    folder: Path,
+) -> None:
+    job = await session.get(ImportJob, job_id)
+    if job is None:
+        logger.error("ImportJob %s not found — aborting", job_id)
+        return
+
+    try:
+        media_paths = sorted(p for p in folder.rglob("*") if p.is_file() and _is_media_path(p))
+
+        job.total = len(media_paths)
+        job.status = ImportJobStatus.processing
+        await session.commit()
+        await _set_rls(session, owner_id)
+
+        for media_path in media_paths:
+            await _ingest_one_from_path(session, job, owner_id, media_path)
+            job.processed += 1
+            await session.commit()
+            await _set_rls(session, owner_id)
+
+        job.status = ImportJobStatus.done
+        await session.commit()
+
+    except Exception as exc:
+        logger.exception("Fatal error processing folder import job %s", job_id)
+        job.status = ImportJobStatus.failed
+        errors = list(job.errors or [])
+        errors.append({"filename": None, "reason": str(exc)})
+        job.errors = errors
+        await session.commit()
+
+
+async def _ingest_one_from_path(
+    session: AsyncSession,
+    job: ImportJob,
+    owner_id: uuid.UUID,
+    file_path: Path,
+) -> None:
+    """Ingest a single media file from the filesystem. Errors are caught and appended to job.errors."""
+    import contextlib
+    from app.services.storage import StorageError
+
+    data = file_path.read_bytes()
+    checksum = _sha256_bytes(data)
+
+    existing = await session.scalar(
+        select(MediaAsset.id).where(
+            MediaAsset.owner_id == owner_id,
+            MediaAsset.checksum == checksum,
+        )
+    )
+    if existing is not None:
+        logger.debug("Skipping duplicate %s (checksum %s)", file_path.name, checksum)
+        job.duplicates += 1
+        return
+
+    staged_key: str | None = None
+    try:
+        async with session.begin_nested():
+            mime = _mime_from_magic(data)
+            if mime is None:
+                raise ValueError("Unsupported or undetectable file type")
+
+            asset_id = uuid.uuid4()
+            suffix = _suffix_for_mime(mime)
+
+            staged_key = storage_service.upload(
+                str(owner_id),
+                str(asset_id),
+                io.BytesIO(data),
+                suffix,
+                mime,
+            )
+
+            from app.models.media import MediaAsset as _MA
+
+            asset = _MA(
+                id=asset_id,
+                owner_id=owner_id,
+                file_size_bytes=len(data),
+                original_filename=file_path.name,
+                mime_type=mime,
+                storage_key=staged_key,
+                checksum=checksum,
+            )
+            session.add(asset)
+            await session.execute(
+                text(
+                    "UPDATE users"
+                    " SET storage_used_bytes = storage_used_bytes + :delta"
+                    " WHERE id = :uid"
+                ),
+                {"delta": len(data), "uid": owner_id},
+            )
+            await session.flush()
+
+            exif_result = extract_exif(data, mime)
+
+            # Sidecar: look for {filename}.json adjacent to the media file
+            sidecar_data: dict | None = None
+            for candidate_name in (_sidecar_name(file_path.name), _sidecar_name(PurePosixPath(file_path.name).name)):
+                candidate_path = file_path.parent / candidate_name
+                if candidate_path.exists():
+                    try:
+                        sidecar_data = json.loads(candidate_path.read_text("utf-8", errors="replace"))
+                    except Exception as exc:
+                        logger.warning("Could not read sidecar %s: %s", candidate_path, exc)
+                    break
+
+            parsed_sidecar = parse_sidecar(sidecar_data) if sidecar_data else None
+            sidecar_found = parsed_sidecar is not None or sidecar_data is not None
+
+            if not sidecar_found:
+                asset.sidecar_missing = True
+                job.no_sidecar += 1
+
+            canonical = merge_metadata(exif_result, parsed_sidecar)
+            if canonical.captured_at is not None:
+                asset.captured_at = canonical.captured_at
+            elif not sidecar_found:
+                asset.captured_at = _mtime_from_path(file_path)
+                logger.warning(
+                    "%s has no sidecar and no EXIF date — using file mtime %s",
+                    file_path.name,
+                    asset.captured_at,
+                )
+            session.add(asset)
+
+            await apply_exif(session, asset_id=asset_id, result=exif_result)
+
+            if parsed_sidecar is not None:
+                await apply_sidecar(session, asset_id=asset_id, owner_id=owner_id, parsed=parsed_sidecar)
+
+            await session.flush()
+
+    except Exception as exc:
+        logger.warning("Failed to ingest %s: %s", file_path.name, exc)
+        if staged_key is not None:
+            with contextlib.suppress(StorageError):
+                storage_service.delete(staged_key)
+        errors = list(job.errors or [])
+        errors.append({"filename": file_path.name, "reason": str(exc)})
+        job.errors = errors
+        await _set_rls(session, owner_id)
+
+
+# ---------------------------------------------------------------------------
+# Folder import — Celery task
+# ---------------------------------------------------------------------------
+
+
+@celery_app.task(name="takeout.process_folder", bind=True, max_retries=0)
+def process_takeout_folder(self, job_id: str, owner_id: str) -> None:
+    """Walk the local folder recorded in the ImportJob and ingest every media file."""
+    job_uuid = uuid.UUID(job_id)
+    owner_uuid = uuid.UUID(owner_id)
+
+    folder_path = asyncio.run(_get_folder_path(job_uuid, owner_uuid))
+    if folder_path is None:
+        logger.error("ImportJob %s not found or has no folder_path; aborting", job_id)
+        return
+
+    asyncio.run(_run_folder_import(job_uuid, owner_uuid, folder_path))
+
+
+async def _get_folder_path(job_id: uuid.UUID, owner_id: uuid.UUID) -> str | None:
+    """Return the folder_path for the given job, or None if not found."""
+    engine = create_async_engine(settings.database_url, pool_pre_ping=True)
+    try:
+        async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+            await session.execute(
+                text(f"SET LOCAL app.current_user_id = '{owner_id}'")
+            )
+            job = await session.get(ImportJob, job_id)
+            return job.folder_path if job else None
+    finally:
+        await engine.dispose()
