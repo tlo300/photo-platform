@@ -30,3 +30,4 @@ class AssetTag(Base):
     tag_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("tags.id", ondelete="CASCADE"), nullable=False
     )
+    source: Mapped[str | None] = mapped_column(String(64), nullable=True)

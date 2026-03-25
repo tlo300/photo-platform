@@ -27,6 +27,7 @@ class MediaAsset(Base):
     mime_type: Mapped[str] = mapped_column(String(127), nullable=False)
     storage_key: Mapped[str] = mapped_column(String(1024), nullable=False, unique=True)
     checksum: Mapped[str] = mapped_column(String(64), nullable=False)
+    description: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[DateTime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
@@ -68,5 +69,6 @@ class Location(Base):
     )
     point: Mapped[object] = mapped_column(Geometry("POINT", srid=4326), nullable=False)
     accuracy_metres: Mapped[float | None] = mapped_column(Float, nullable=True)
+    altitude_metres: Mapped[float | None] = mapped_column(Float, nullable=True)
     display_name: Mapped[str | None] = mapped_column(String(512), nullable=True)
     country: Mapped[str | None] = mapped_column(String(128), nullable=True)
