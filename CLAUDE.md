@@ -79,10 +79,25 @@ Update this section at the end of every working session.
 
 ```
 Active milestone : 4 – Photo library and browsing
-Last completed  : #88 Metadata backfill (PR pending, 2026-03-25)
+Last completed  : #92 Extend search to EXIF metadata fields (PR pending, 2026-03-25)
 In progress     : (none)
 Blocked         : (none)
 ```
+
+### Handoff — 2026-03-25 (#92 Extend search to EXIF metadata fields)
+**Completed:**
+- Migration 0017: GIN FTS index on `media_metadata(make, model)` using `simple` dictionary
+- `search_assets()`: outerjoin `MediaMetadata`, `camera_vec` added to OR condition and ts_rank
+- Search bar placeholder updated to "…or camera…"
+- 2 new integration tests (match by make, match by model); all 10 tests pass
+
+**Gotchas:**
+- `lens_model` column does not exist — #88 added ISO/aperture/shutter_speed/focal_length/flash
+  but not lens_model. That acceptance criterion is unmet and noted in the PR.
+- `camera_vec` uses string concatenation (`make || ' ' || model`) rather than `concat_ws` because
+  concat_ws is not needed here — both coalesces are already empty-string safe.
+
+**Suggested next step:** Open PR for #92, then move to #27 Albums API.
 
 ### Handoff — 2026-03-25 (#88 Metadata backfill)
 **Completed:**
@@ -215,7 +230,7 @@ Update the status column as issues progress.
 | #25   | Asset detail view                        | 4         | pr-open |
 | #26   | Basic search                             | 4         | pr-open |
 | #88   | Metadata backfill                        | 4         | pr-open |
-| #92   | Extend search to EXIF metadata fields    | 4         | backlog |
+| #92   | Extend search to EXIF metadata fields    | 4         | pr-open |
 | #27   | Albums API (CRUD)                        | 5         | backlog |
 | #28   | Google Takeout album import              | 5         | backlog |
 | #29   | Albums UI                                | 5         | backlog |
