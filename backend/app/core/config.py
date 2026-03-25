@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     storage_secret_key: str = "changeme"
     storage_bucket: str = "photos"
     storage_use_ssl: bool = False
+    # Public URL used to rewrite presigned URLs so browsers can reach storage.
+    # In dev, set to http://localhost/storage (proxied through Caddy).
+    # Leave unset in production when storage is directly accessible.
+    storage_public_url: str | None = None
 
     # JWT
     jwt_secret: str

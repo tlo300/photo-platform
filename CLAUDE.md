@@ -79,10 +79,33 @@ Update this section at the end of every working session.
 
 ```
 Active milestone : 4 – Photo library and browsing
-Last completed  : #25 Asset detail view (PR pending, 2026-03-25)
+Last completed  : #26 Basic search (PR pending, 2026-03-25)
 In progress     : (none)
 Blocked         : (none)
 ```
+
+### Handoff — 2026-03-25 (#26 Basic search)
+**Completed:**
+- Migration 0015: GIN functional indexes on description (english), tags.name (simple),
+  and locations.display_name+country (simple)
+- `GET /assets/search?q=` endpoint: full-text search via `websearch_to_tsquery`, ordered
+  by `ts_rank` then `captured_at`. Empty q falls back to timeline order. No cursor —
+  returns up to `limit` results with `next_cursor=null`
+- Frontend: debounced search bar (300 ms) on library page; shows search results in flat
+  grid, hides infinite-scroll timeline while query is active
+- 8 integration tests: match by description/tag/display_name/country, empty→all,
+  no-match→empty, RLS isolation, 401
+
+**Gotchas:**
+- `websearch_to_tsquery('simple', q)` used for tags and locality — 'simple' dictionary
+  preserves proper nouns/place names without stemming. Description uses 'english'.
+- Route `/search` must be declared before `/{asset_id}` in assets.py — FastAPI matches
+  in declaration order. This is already correct.
+- `func.concat_ws(" ", Location.display_name, Location.country)` handles NULL gracefully
+  (skips NULL fields) — avoids `to_tsvector('simple', NULL)` errors in the outer join.
+- Issue #92 created to extend search to EXIF metadata fields once #88 (backfill) is done.
+
+**Suggested next step:** Open PRs for #25 and #26, then move to #27 Albums API or #88 Metadata backfill.
 
 ### Handoff — 2026-03-25 (#25 Asset detail view)
 **Completed:**
@@ -140,7 +163,8 @@ Update the status column as issues progress.
 | #23   | Thumbnail generation worker              | 4         | merged  |
 | #24   | Timeline grid UI                         | 4         | pr-open |
 | #25   | Asset detail view                        | 4         | pr-open |
-| #26   | Basic search                             | 4         | backlog |
+| #26   | Basic search                             | 4         | pr-open |
+| #92   | Extend search to EXIF metadata fields    | 4         | backlog |
 | #27   | Albums API (CRUD)                        | 5         | backlog |
 | #28   | Google Takeout album import              | 5         | backlog |
 | #29   | Albums UI                                | 5         | backlog |

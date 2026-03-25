@@ -1,10 +1,12 @@
-"""Assets API: paginated timeline and filtering for the authenticated user's media assets.
+"""Assets API: paginated timeline, search, and detail for the authenticated user's media assets.
 
 Endpoints:
-  GET /assets       — paginated timeline ordered by captured_at DESC, id DESC.
-                      Optional filters: person, date_from, date_to, media_type, has_location.
-                      Cursor-based pagination; each response includes a next_cursor field.
-  GET /assets/{id}  — full detail for a single asset: presigned URL, metadata, location, tags.
+  GET /assets          — paginated timeline ordered by captured_at DESC, id DESC.
+                         Optional filters: person, date_from, date_to, media_type, has_location.
+                         Cursor-based pagination; each response includes a next_cursor field.
+  GET /assets/search   — full-text search across description, tag names, and locality.
+                         Ordered by relevance then captured_at DESC. Empty q returns first page.
+  GET /assets/{id}     — full detail for a single asset: presigned URL, metadata, location, tags.
 """
 
 import base64
@@ -16,7 +18,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from geoalchemy2.functions import ST_X, ST_Y
 from pydantic import BaseModel
-from sqlalchemy import exists, select
+from sqlalchemy import exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import get_current_user
@@ -66,6 +68,9 @@ class AssetMetadata(BaseModel):
 class AssetLocation(BaseModel):
     latitude: float
     longitude: float
+    altitude_metres: float | None
+    display_name: str | None
+    country: str | None
 
 
 class AssetTagItem(BaseModel):
@@ -78,6 +83,8 @@ class AssetDetail(BaseModel):
     original_filename: str
     mime_type: str
     captured_at: datetime | None
+    file_size_bytes: int
+    description: str | None
     full_url: str
     thumbnail_url: str | None
     metadata: AssetMetadata | None
@@ -267,6 +274,87 @@ async def list_assets(
     return PagedAssetResponse(items=items, next_cursor=next_cursor)
 
 
+@router.get("/search", response_model=PagedAssetResponse)
+async def search_assets(
+    q: str = Query("", description="Search query (description, tags, locality)"),
+    limit: int = Query(_DEFAULT_PAGE_SIZE, ge=1, le=_MAX_PAGE_SIZE, description="Max results"),
+    user_id: uuid.UUID = Depends(get_current_user),
+    session: AsyncSession = Depends(get_authed_session),
+) -> PagedAssetResponse:
+    """Full-text search across asset descriptions, tag names, and locality (city/country).
+
+    Uses PostgreSQL websearch_to_tsquery so users can type natural phrases.
+    Results are ordered by relevance (ts_rank) then captured_at DESC.
+
+    Empty q returns the first page of assets ordered by captured_at, identical
+    to the first page of GET /assets with no filters.
+
+    RLS ensures results are scoped to the authenticated user.
+    """
+    stmt = (
+        select(MediaAsset)
+        .outerjoin(Location, Location.asset_id == MediaAsset.id)
+        .where(MediaAsset.owner_id == user_id)
+    )
+
+    if q.strip():
+        tsq = func.websearch_to_tsquery("simple", q)
+
+        # Tag match: correlated EXISTS so each asset is returned at most once
+        # even when multiple tags match.
+        tag_match = (
+            select(Tag.id)
+            .join(AssetTag, AssetTag.tag_id == Tag.id)
+            .where(
+                AssetTag.asset_id == MediaAsset.id,
+                func.to_tsvector("simple", Tag.name).op("@@")(tsq),
+            )
+            .exists()
+        )
+
+        desc_vec = func.to_tsvector("english", func.coalesce(MediaAsset.description, ""))
+        loc_vec = func.to_tsvector(
+            "simple",
+            func.concat_ws(" ", Location.display_name, Location.country),
+        )
+
+        stmt = stmt.where(
+            or_(
+                desc_vec.op("@@")(func.websearch_to_tsquery("english", q)),
+                tag_match,
+                loc_vec.op("@@")(tsq),
+            )
+        )
+
+        rank = func.ts_rank(desc_vec.op("||")(loc_vec), tsq)
+        stmt = stmt.order_by(
+            rank.desc(),
+            MediaAsset.captured_at.desc().nulls_last(),
+            MediaAsset.id.desc(),
+        )
+    else:
+        stmt = stmt.order_by(
+            MediaAsset.captured_at.desc().nulls_last(),
+            MediaAsset.id.desc(),
+        )
+
+    stmt = stmt.limit(limit)
+    rows = list(await session.scalars(stmt))
+
+    items = [
+        AssetItem(
+            id=asset.id,
+            original_filename=asset.original_filename,
+            mime_type=asset.mime_type,
+            captured_at=asset.captured_at,
+            thumbnail_ready=asset.thumbnail_ready,
+            thumbnail_url=_thumbnail_url(user_id, asset.id, asset.thumbnail_ready),
+        )
+        for asset in rows
+    ]
+    return PagedAssetResponse(items=items, next_cursor=None)
+
+
 @router.get("/{asset_id}", response_model=AssetDetail)
 async def get_asset(
     asset_id: uuid.UUID = Path(..., description="Asset UUID"),
@@ -291,10 +379,13 @@ async def get_asset(
     meta_stmt = select(MediaMetadata).where(MediaMetadata.asset_id == asset_id)
     meta: MediaMetadata | None = await session.scalar(meta_stmt)
 
-    # Location — extract lat/lng from the PostGIS point.
+    # Location — extract lat/lng from the PostGIS point plus stored fields.
     loc_stmt = select(
         ST_Y(Location.point).label("latitude"),
         ST_X(Location.point).label("longitude"),
+        Location.altitude_metres,
+        Location.display_name,
+        Location.country,
     ).where(Location.asset_id == asset_id)
     loc_row = (await session.execute(loc_stmt)).one_or_none()
 
@@ -321,6 +412,8 @@ async def get_asset(
         original_filename=asset.original_filename,
         mime_type=asset.mime_type,
         captured_at=asset.captured_at,
+        file_size_bytes=asset.file_size_bytes,
+        description=asset.description,
         full_url=full_url,
         thumbnail_url=_thumbnail_url(user_id, asset.id, asset.thumbnail_ready),
         metadata=AssetMetadata(
@@ -333,6 +426,9 @@ async def get_asset(
         location=AssetLocation(
             latitude=float(loc_row.latitude),
             longitude=float(loc_row.longitude),
+            altitude_metres=loc_row.altitude_metres,
+            display_name=loc_row.display_name,
+            country=loc_row.country,
         ) if loc_row is not None else None,
         tags=[AssetTagItem(name=row.name, source=row.source) for row in tag_rows],
     )

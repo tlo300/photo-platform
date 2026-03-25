@@ -8,6 +8,15 @@
         reverse_proxy backend:8000
     }
 
+    # Storage — proxy presigned MinIO URLs to the MinIO container.
+    # Host header must match the internal endpoint so S3v4 signatures validate.
+    handle /storage/* {
+        uri strip_prefix /storage
+        reverse_proxy minio:9000 {
+            header_up Host minio:9000
+        }
+    }
+
     # Everything else — proxy to Next.js frontend
     handle {
         reverse_proxy frontend:3000

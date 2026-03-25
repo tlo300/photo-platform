@@ -246,6 +246,9 @@ export interface AssetMetadata {
 export interface AssetLocation {
   latitude: number;
   longitude: number;
+  altitude_metres: number | null;
+  display_name: string | null;
+  country: string | null;
 }
 
 export interface AssetTagItem {
@@ -258,11 +261,29 @@ export interface AssetDetail {
   original_filename: string;
   mime_type: string;
   captured_at: string | null;
+  file_size_bytes: number;
+  description: string | null;
   full_url: string;
   thumbnail_url: string | null;
   metadata: AssetMetadata | null;
   location: AssetLocation | null;
   tags: AssetTagItem[];
+}
+
+export async function searchAssets(
+  token: string,
+  q: string,
+  limit = 50
+): Promise<AssetsPage> {
+  const params = new URLSearchParams({ q, limit: String(limit) });
+  const res = await fetch(`${CLIENT_API_URL}/assets/search?${params}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error((data as { detail?: string }).detail ?? "Search failed");
+  }
+  return res.json();
 }
 
 export async function getAsset(token: string, id: string): Promise<AssetDetail> {
