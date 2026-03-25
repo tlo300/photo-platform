@@ -235,6 +235,47 @@ export async function getAssets(
   return res.json();
 }
 
+export interface AssetMetadata {
+  make: string | null;
+  model: string | null;
+  width_px: number | null;
+  height_px: number | null;
+  duration_seconds: number | null;
+}
+
+export interface AssetLocation {
+  latitude: number;
+  longitude: number;
+}
+
+export interface AssetTagItem {
+  name: string;
+  source: string | null;
+}
+
+export interface AssetDetail {
+  id: string;
+  original_filename: string;
+  mime_type: string;
+  captured_at: string | null;
+  full_url: string;
+  thumbnail_url: string | null;
+  metadata: AssetMetadata | null;
+  location: AssetLocation | null;
+  tags: AssetTagItem[];
+}
+
+export async function getAsset(token: string, id: string): Promise<AssetDetail> {
+  const res = await fetch(`${CLIENT_API_URL}/assets/${id}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error((data as { detail?: string }).detail ?? "Failed to load asset");
+  }
+  return res.json();
+}
+
 export async function createInvitation(
   token: string,
   email: string
