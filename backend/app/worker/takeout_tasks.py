@@ -34,6 +34,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.config import settings
+from app.models.album import Album, AlbumAsset
 from app.models.import_job import ImportJob, ImportJobStatus
 from app.models.media import MediaAsset
 from app.services.exif import apply_exif, extract_exif
@@ -129,6 +130,88 @@ def _mtime_from_zip_info(info: zipfile.ZipInfo) -> datetime:
         max(year, 1980), max(month, 1), max(day, 1),
         hour, minute, min(second, 59),
         tzinfo=timezone.utc,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Album hierarchy helpers
+# ---------------------------------------------------------------------------
+
+
+def _zip_folder_path(media_name: str) -> str | None:
+    """Return the folder portion of a zip entry path, or None for root-level files.
+
+    Examples:
+        "2001/january/photo.jpg" → "2001/january"
+        "photo.jpg"              → None
+    """
+    parent = str(PurePosixPath(media_name).parent)
+    return None if parent == "." else parent
+
+
+async def _get_or_create_album(
+    session: AsyncSession,
+    owner_id: uuid.UUID,
+    parent_id: uuid.UUID | None,
+    title: str,
+) -> uuid.UUID:
+    """Return the id of an existing album matching (owner, parent, title), creating it if absent."""
+    if parent_id is None:
+        stmt = select(Album.id).where(
+            Album.owner_id == owner_id,
+            Album.title == title,
+            Album.parent_id.is_(None),
+        )
+    else:
+        stmt = select(Album.id).where(
+            Album.owner_id == owner_id,
+            Album.title == title,
+            Album.parent_id == parent_id,
+        )
+    existing = await session.scalar(stmt)
+    if existing is not None:
+        return existing
+
+    album_id = uuid.uuid4()
+    session.add(Album(id=album_id, owner_id=owner_id, parent_id=parent_id, title=title))
+    await session.flush()
+    return album_id
+
+
+async def _ensure_album_path(
+    session: AsyncSession,
+    owner_id: uuid.UUID,
+    folder_path: str,
+) -> uuid.UUID | None:
+    """Walk folder_path segments and return the deepest album id, creating albums as needed.
+
+    Examples:
+        "2001"          → creates/reuses album "2001" (root), returns its id
+        "2001/january"  → creates/reuses "2001" then "january" (child), returns january's id
+    """
+    parts = [p for p in PurePosixPath(folder_path).parts if p and p != "."]
+    if not parts:
+        return None
+
+    parent_id: uuid.UUID | None = None
+    for part in parts:
+        parent_id = await _get_or_create_album(session, owner_id, parent_id, part)
+    return parent_id
+
+
+async def _link_asset_to_album(
+    session: AsyncSession,
+    album_id: uuid.UUID,
+    asset_id: uuid.UUID,
+) -> None:
+    """Insert an album_assets row, ignoring duplicates."""
+    await session.execute(
+        text(
+            "INSERT INTO album_assets (album_id, asset_id)"
+            " VALUES (:album_id, :asset_id)"
+            " ON CONFLICT DO NOTHING"
+        ),
+        {"album_id": album_id, "asset_id": asset_id},
     )
 
 
@@ -330,6 +413,13 @@ async def _ingest_one(
                     parsed=parsed_sidecar,
                 )
 
+            # Create/reuse album hierarchy from the zip entry's folder path
+            folder_path = _zip_folder_path(media_name)
+            if folder_path is not None:
+                album_id = await _ensure_album_path(session, owner_id, folder_path)
+                if album_id is not None:
+                    await _link_asset_to_album(session, album_id, asset_id)
+
             await session.flush()
 
     except Exception as exc:
@@ -460,7 +550,7 @@ async def _process_folder(
         await _set_rls(session, owner_id)
 
         for media_path in media_paths:
-            await _ingest_one_from_path(session, job, owner_id, media_path)
+            await _ingest_one_from_path(session, job, owner_id, media_path, folder)
             job.processed += 1
             await session.commit()
             await _set_rls(session, owner_id)
@@ -482,6 +572,7 @@ async def _ingest_one_from_path(
     job: ImportJob,
     owner_id: uuid.UUID,
     file_path: Path,
+    import_root: Path,
 ) -> None:
     """Ingest a single media file from the filesystem. Errors are caught and appended to job.errors."""
     import contextlib
@@ -577,6 +668,16 @@ async def _ingest_one_from_path(
 
             if parsed_sidecar is not None:
                 await apply_sidecar(session, asset_id=asset_id, owner_id=owner_id, parsed=parsed_sidecar)
+
+            # Create/reuse album hierarchy from the file's relative folder path
+            try:
+                rel_parent = str(PurePosixPath(file_path.relative_to(import_root).parent))
+            except ValueError:
+                rel_parent = None
+            if rel_parent and rel_parent != ".":
+                album_id = await _ensure_album_path(session, owner_id, rel_parent)
+                if album_id is not None:
+                    await _link_asset_to_album(session, album_id, asset_id)
 
             await session.flush()
 
