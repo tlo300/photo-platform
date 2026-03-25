@@ -78,9 +78,9 @@ When making a non-obvious technical decision, create docs/decisions/NNN-short-ti
 Update this section at the end of every working session.
 
 ```
-Active milestone : 3 – Google Takeout import pipeline
+Active milestone : 4 – Photo library and browsing
 Last completed  : #75 Preserve Takeout folder structure as albums (merged 2026-03-25)
-In progress     : (none)
+In progress     : #22 Library API (paginated timeline) (PR #85 open)
 Blocked         : (none)
 ```
 
@@ -116,7 +116,7 @@ Update the status column as issues progress.
 | #44   | People tags import and storage           | 3         | pr-open |
 | #74   | Local folder import                      | 3         | pr-open |
 | #75   | Preserve Takeout folder structure as albums | 3      | merged  |
-| #22   | Library API (paginated timeline)         | 4         | backlog |
+| #22   | Library API (paginated timeline)         | 4         | pr-open |
 | #23   | Thumbnail generation worker              | 4         | backlog |
 | #24   | Timeline grid UI                         | 4         | backlog |
 | #25   | Asset detail view                        | 4         | backlog |
