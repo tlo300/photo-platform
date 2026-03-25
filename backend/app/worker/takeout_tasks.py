@@ -27,6 +27,7 @@ import os
 import tempfile
 import uuid
 import zipfile
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
 from sqlalchemy import select, text
@@ -113,6 +114,22 @@ def _suffix_for_mime(mime: str) -> str:
         "video/x-matroska": ".mkv",
     }
     return _MAP.get(mime, "")
+
+
+def _mtime_from_zip_info(info: zipfile.ZipInfo) -> datetime:
+    """Return the last-modified timestamp from a ZipInfo entry as a UTC datetime.
+
+    ZipInfo.date_time is a 6-tuple (year, month, day, hour, min, sec).
+    Zip timestamps have no timezone — we treat them as UTC, which is a safe
+    last-resort fallback consistent with what most tools assume.
+    """
+    year, month, day, hour, minute, second = info.date_time
+    # ZipInfo can store seconds as 0 for entries with no time; clamp to valid range.
+    return datetime(
+        max(year, 1980), max(month, 1), max(day, 1),
+        hour, minute, min(second, 59),
+        tzinfo=timezone.utc,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -277,12 +294,27 @@ async def _ingest_one(
                     break
 
             parsed_sidecar = parse_sidecar(sidecar_data) if sidecar_data else None
+            sidecar_found = parsed_sidecar is not None or sidecar_data is not None
+
+            if not sidecar_found:
+                asset.sidecar_missing = True
+                job.no_sidecar += 1
 
             # Resolve captured_at via the canonical merge strategy
             canonical = merge_metadata(exif_result, parsed_sidecar)
             if canonical.captured_at is not None:
                 asset.captured_at = canonical.captured_at
-                session.add(asset)
+            elif not sidecar_found:
+                # Neither sidecar nor EXIF provided a date — fall back to the
+                # zip entry's last-modified timestamp as a last resort.
+                zip_info = zf.getinfo(media_name)
+                asset.captured_at = _mtime_from_zip_info(zip_info)
+                logger.warning(
+                    "%s has no sidecar and no EXIF date — using zip mtime %s",
+                    media_name,
+                    asset.captured_at,
+                )
+            session.add(asset)
 
             await apply_exif(
                 session,

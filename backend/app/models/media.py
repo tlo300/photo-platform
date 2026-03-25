@@ -1,7 +1,7 @@
 import uuid
 
 from geoalchemy2 import Geometry
-from sqlalchemy import BigInteger, DateTime, Float, ForeignKey, Index, Integer, String, text
+from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -28,6 +28,9 @@ class MediaAsset(Base):
     storage_key: Mapped[str] = mapped_column(String(1024), nullable=False, unique=True)
     checksum: Mapped[str] = mapped_column(String(64), nullable=False)
     description: Mapped[str | None] = mapped_column(String, nullable=True)
+    sidecar_missing: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
     created_at: Mapped[DateTime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )

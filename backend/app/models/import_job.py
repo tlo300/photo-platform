@@ -39,6 +39,9 @@ class ImportJob(Base):
     duplicates: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=text("0")
     )
+    no_sidecar: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
     errors: Mapped[list] = mapped_column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )
