@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { getAssets, AssetItem } from "@/lib/api";
 
+const SCROLL_KEY = "home-scroll-y";
+
 function groupByMonth(items: AssetItem[]): { label: string; assets: AssetItem[] }[] {
   const groups: Map<string, AssetItem[]> = new Map();
   for (const item of items) {
@@ -31,10 +33,23 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
+  const didRestoreScroll = useRef(false);
 
   useEffect(() => {
     if (ready && !token) router.replace("/login");
   }, [ready, token, router]);
+
+  // Restore scroll position when returning from a detail page.
+  // Runs once after the first batch of items renders.
+  useEffect(() => {
+    if (items.length === 0 || didRestoreScroll.current) return;
+    const saved = sessionStorage.getItem(SCROLL_KEY);
+    if (saved) {
+      window.scrollTo({ top: parseInt(saved, 10), behavior: "instant" });
+      sessionStorage.removeItem(SCROLL_KEY);
+    }
+    didRestoreScroll.current = true;
+  }, [items]);
 
   const fetchPage = useCallback(
     async (cursor?: string) => {
@@ -102,6 +117,7 @@ export default function Home() {
                 key={asset.id}
                 href={`/assets/${asset.id}`}
                 className="aspect-square block overflow-hidden bg-gray-100"
+                onClick={() => sessionStorage.setItem(SCROLL_KEY, String(window.scrollY))}
               >
                 {asset.thumbnail_url ? (
                   <img
