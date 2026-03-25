@@ -2,8 +2,11 @@
 
 Endpoints:
   GET /assets          — paginated timeline ordered by captured_at DESC, id DESC.
-                         Optional filters: person, date_from, date_to, media_type, has_location.
+                         Optional filters: person, date_from, date_to, media_type, has_location,
+                         near (lat,lon), radius_km.
                          Cursor-based pagination; each response includes a next_cursor field.
+                         When near is specified, results are ordered by distance and next_cursor
+                         is always null (no cursor pagination for geo queries).
   GET /assets/search   — full-text search across description, tag names, and locality.
                          Ordered by relevance then captured_at DESC. Empty q returns first page.
   GET /assets/{id}     — full detail for a single asset: presigned URL, metadata, location, tags.
@@ -17,8 +20,9 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from geoalchemy2.functions import ST_X, ST_Y
+from geoalchemy2.types import Geography
 from pydantic import BaseModel
-from sqlalchemy import exists, func, or_, select
+from sqlalchemy import cast, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import get_current_user
@@ -156,6 +160,8 @@ async def list_assets(
     date_to: datetime | None = Query(None, description="Only assets with captured_at <= this value"),
     media_type: Literal["photo", "video"] | None = Query(None, description="Filter by media type"),
     has_location: bool | None = Query(None, description="True = only assets with GPS; False = only without"),
+    near: str | None = Query(None, description="lat,lon centre for proximity filter (e.g. 52.37,4.89)"),
+    radius_km: float = Query(10.0, ge=0.1, le=5000.0, description="Search radius in km (requires near)"),
     # Dependencies
     user_id: uuid.UUID = Depends(get_current_user),
     session: AsyncSession = Depends(get_authed_session),
@@ -210,54 +216,86 @@ async def list_assets(
             ~exists().where(Location.asset_id == MediaAsset.id)
         )
 
-    # Cursor — keyset pagination on (captured_at DESC NULLS LAST, id DESC).
-    # Three cases for the WHERE predicate:
-    #   A) cursor has a non-null captured_at:
-    #      rows where captured_at < cursor_at
-    #      OR (captured_at = cursor_at AND id < cursor_id)
-    #      OR captured_at IS NULL          ← NULL section comes after all dated rows
-    #   B) cursor has a null captured_at (we are in the NULL section):
-    #      rows where captured_at IS NULL AND id < cursor_id
-    if cursor is not None:
-        cursor_at, cursor_id = _decode_cursor(cursor)
-        if cursor_at is not None:
-            from sqlalchemy import or_, and_, null
-            stmt = stmt.where(
-                or_(
-                    MediaAsset.captured_at < cursor_at,
-                    and_(
-                        MediaAsset.captured_at == cursor_at,
-                        MediaAsset.id < cursor_id,
-                    ),
-                    MediaAsset.captured_at.is_(None),
-                )
+    # Proximity filter — joins locations and filters by ST_DWithin (geography metres).
+    # When active, cursor pagination is bypassed and results are ordered by distance.
+    _near_geog = None
+    _point_geog = None
+    if near is not None:
+        try:
+            lat_str, lon_str = near.split(",", 1)
+            _near_lat = float(lat_str.strip())
+            _near_lon = float(lon_str.strip())
+            if not (-90 <= _near_lat <= 90) or not (-180 <= _near_lon <= 180):
+                raise ValueError
+        except (ValueError, AttributeError):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="near must be lat,lon (e.g. 52.37,4.89).",
             )
-        else:
-            from sqlalchemy import and_
-            stmt = stmt.where(
-                MediaAsset.captured_at.is_(None),
-                MediaAsset.id < cursor_id,
-            )
-
-    # Order and fetch limit+1 to detect whether there is a next page.
-    stmt = (
-        stmt
-        .order_by(
-            MediaAsset.captured_at.desc().nulls_last(),
-            MediaAsset.id.desc(),
+        _near_geog = cast(
+            func.ST_SetSRID(func.ST_MakePoint(_near_lon, _near_lat), 4326), Geography
         )
-        .limit(limit + 1)
-    )
+        _point_geog = cast(Location.point, Geography)
+        stmt = (
+            stmt
+            .join(Location, Location.asset_id == MediaAsset.id)
+            .where(func.ST_DWithin(_point_geog, _near_geog, radius_km * 1000))
+        )
 
-    rows = list(await session.scalars(stmt))
+    if _near_geog is not None:
+        # Distance ordering — no cursor pagination for geo queries.
+        stmt = stmt.order_by(func.ST_Distance(_point_geog, _near_geog)).limit(limit)
+        page = list(await session.scalars(stmt))
+        next_cursor: str | None = None
+    else:
+        # Cursor — keyset pagination on (captured_at DESC NULLS LAST, id DESC).
+        # Three cases for the WHERE predicate:
+        #   A) cursor has a non-null captured_at:
+        #      rows where captured_at < cursor_at
+        #      OR (captured_at = cursor_at AND id < cursor_id)
+        #      OR captured_at IS NULL          ← NULL section comes after all dated rows
+        #   B) cursor has a null captured_at (we are in the NULL section):
+        #      rows where captured_at IS NULL AND id < cursor_id
+        if cursor is not None:
+            cursor_at, cursor_id = _decode_cursor(cursor)
+            if cursor_at is not None:
+                from sqlalchemy import or_, and_, null
+                stmt = stmt.where(
+                    or_(
+                        MediaAsset.captured_at < cursor_at,
+                        and_(
+                            MediaAsset.captured_at == cursor_at,
+                            MediaAsset.id < cursor_id,
+                        ),
+                        MediaAsset.captured_at.is_(None),
+                    )
+                )
+            else:
+                from sqlalchemy import and_
+                stmt = stmt.where(
+                    MediaAsset.captured_at.is_(None),
+                    MediaAsset.id < cursor_id,
+                )
 
-    has_next = len(rows) > limit
-    page = rows[:limit]
+        # Order and fetch limit+1 to detect whether there is a next page.
+        stmt = (
+            stmt
+            .order_by(
+                MediaAsset.captured_at.desc().nulls_last(),
+                MediaAsset.id.desc(),
+            )
+            .limit(limit + 1)
+        )
 
-    next_cursor: str | None = None
-    if has_next:
-        last = page[-1]
-        next_cursor = _encode_cursor(last.captured_at, last.id)
+        rows = list(await session.scalars(stmt))
+
+        has_next = len(rows) > limit
+        page = rows[:limit]
+
+        next_cursor = None
+        if has_next:
+            last = page[-1]
+            next_cursor = _encode_cursor(last.captured_at, last.id)
 
     items = [
         AssetItem(
