@@ -7,6 +7,8 @@ Tests cover:
   - Video mime type → all-None result, no crash
   - Corrupt bytes → all-None result, no crash
   - Timestamp merge: sidecar_captured_at must not be overwritten by apply_exif
+  - HEIC with full EXIF (make, model, dimensions)
+  - HEIC with no EXIF — returns None metadata, no crash
 """
 
 import io
@@ -15,7 +17,7 @@ from datetime import datetime, timezone
 import pytest
 from PIL import Image
 
-from app.services.exif import ExifResult, extract_exif, _parse_exif_datetime
+from app.services.exif import ExifResult, _HEIF_AVAILABLE, extract_exif, _parse_exif_datetime
 
 # ---------------------------------------------------------------------------
 # Helpers to build minimal in-memory images with EXIF
@@ -43,6 +45,20 @@ def _make_jpeg(width: int = 120, height: int = 80, with_exif: bool = True) -> by
     else:
         buf = io.BytesIO()
         img.save(buf, format="JPEG")
+    return buf.getvalue()
+
+
+def _make_heic(width: int = 120, height: int = 80, with_exif: bool = True) -> bytes:
+    img = Image.new("RGB", (width, height), color=(64, 128, 192))
+    buf = io.BytesIO()
+    if with_exif:
+        exif = img.getexif()
+        exif[_TAG_MAKE] = _MAKE
+        exif[_TAG_MODEL] = _MODEL
+        exif[_TAG_DATETIME_ORIGINAL] = _DATETIME_ORIGINAL
+        img.save(buf, format="HEIF", exif=exif.tobytes())
+    else:
+        img.save(buf, format="HEIF")
     return buf.getvalue()
 
 
@@ -192,3 +208,26 @@ class TestParseExifDatetime:
 
     def test_partial_string(self):
         assert _parse_exif_datetime("2021:08:14") is None
+
+
+# ---------------------------------------------------------------------------
+# HEIC / HEIF tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(not _HEIF_AVAILABLE, reason="pillow-heif not installed")
+class TestHeicExif:
+    def test_make_model_and_dimensions_extracted(self):
+        result = extract_exif(_make_heic(with_exif=True), "image/heic")
+        assert result.make == _MAKE
+        assert result.model == _MODEL
+        assert result.width_px == 120
+        assert result.height_px == 80
+
+    def test_heic_without_exif_returns_none_metadata_no_crash(self):
+        result = extract_exif(_make_heic(with_exif=False), "image/heic")
+        assert result.make is None
+        assert result.model is None
+        assert result.captured_at is None
+        assert result.width_px == 120
+        assert result.height_px == 80
