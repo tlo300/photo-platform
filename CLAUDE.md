@@ -78,8 +78,8 @@ When making a non-obvious technical decision, create docs/decisions/NNN-short-ti
 Update this section at the end of every working session.
 
 ```
-Active milestone : 2a – Security and multi-tenancy
-Last completed  : #16 Sharing data model and API foundation (pr-open)
+Active milestone : 3 – Google Takeout import pipeline
+Last completed  : #18 Google Takeout sidecar parser (pr-open)
 In progress     : (none)
 Blocked         : (none)
 ```
@@ -106,7 +106,7 @@ Update the status column as issues progress.
 | #15   | User invitation system                   | 2a        | pr-open |
 | #16   | Sharing data model and API foundation    | 2a        | pr-open |
 | #17   | Dependency scanning and security CI      | 2a        | pr-open |
-| #18   | Google Takeout sidecar parser            | 3         | backlog |
+| #18   | Google Takeout sidecar parser            | 3         | pr-open |
 | #19   | EXIF extraction from image/video files   | 3         | backlog |
 | #20   | Takeout zip upload and ingestion         | 3         | backlog |
 | #21   | Import progress UI                       | 3         | backlog |
