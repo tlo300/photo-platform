@@ -16,6 +16,11 @@ class Album(Base):
     owner_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("albums.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     title: Mapped[str] = mapped_column(String(512), nullable=False)
     cover_asset_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
