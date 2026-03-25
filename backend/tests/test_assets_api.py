@@ -1,4 +1,7 @@
-"""Integration tests for GET /assets (issue #44).
+"""Integration tests for GET /assets person filter (issue #44).
+
+Response shape changed in issue #22: the endpoint now returns
+{"items": [...], "next_cursor": ...} instead of a bare list.
 
 Covers:
   1. Single person tag — asset returned for that person
@@ -288,7 +291,7 @@ async def test_single_person_tag(user_token, test_data):
             headers={"Authorization": f"Bearer {user_token}"},
         )
     assert resp.status_code == 200, resp.text
-    ids = [a["id"] for a in resp.json()]
+    ids = [a["id"] for a in resp.json()["items"]]
     assert test_data["asset_charlie"] in ids
     assert test_data["asset_alice_bob"] not in ids
 
@@ -303,7 +306,7 @@ async def test_multiple_people_tags_first_name(user_token, test_data):
             headers={"Authorization": f"Bearer {user_token}"},
         )
     assert resp.status_code == 200, resp.text
-    ids = [a["id"] for a in resp.json()]
+    ids = [a["id"] for a in resp.json()["items"]]
     assert test_data["asset_alice_bob"] in ids
     assert test_data["asset_charlie"] not in ids
 
@@ -318,7 +321,7 @@ async def test_multiple_people_tags_second_name(user_token, test_data):
             headers={"Authorization": f"Bearer {user_token}"},
         )
     assert resp.status_code == 200, resp.text
-    ids = [a["id"] for a in resp.json()]
+    ids = [a["id"] for a in resp.json()["items"]]
     assert test_data["asset_alice_bob"] in ids
 
 
@@ -332,7 +335,7 @@ async def test_empty_people_array_not_returned(user_token, test_data):
             headers={"Authorization": f"Bearer {user_token}"},
         )
     assert resp.status_code == 200, resp.text
-    ids = [a["id"] for a in resp.json()]
+    ids = [a["id"] for a in resp.json()["items"]]
     assert test_data["asset_no_people"] not in ids
 
 
@@ -346,7 +349,7 @@ async def test_person_filter_case_insensitive(user_token, test_data):
             headers={"Authorization": f"Bearer {user_token}"},
         )
     assert resp.status_code == 200, resp.text
-    ids = [a["id"] for a in resp.json()]
+    ids = [a["id"] for a in resp.json()["items"]]
     assert test_data["asset_alice_bob"] in ids
 
 
@@ -360,7 +363,7 @@ async def test_no_match_returns_empty_list(user_token, test_data):
             headers={"Authorization": f"Bearer {user_token}"},
         )
     assert resp.status_code == 200, resp.text
-    assert resp.json() == []
+    assert resp.json()["items"] == []
 
 
 @pytest.mark.asyncio
@@ -374,7 +377,7 @@ async def test_rls_isolation(user_token, other_user_token, test_data):
             headers={"Authorization": f"Bearer {user_token}"},
         )
         assert resp1.status_code == 200, resp1.text
-        ids1 = [a["id"] for a in resp1.json()]
+        ids1 = [a["id"] for a in resp1.json()["items"]]
         assert test_data["asset_other_alice"] not in ids1
 
         # User 2 queries Alice — must not see user 1's asset
@@ -384,7 +387,7 @@ async def test_rls_isolation(user_token, other_user_token, test_data):
             headers={"Authorization": f"Bearer {other_user_token}"},
         )
         assert resp2.status_code == 200, resp2.text
-        ids2 = [a["id"] for a in resp2.json()]
+        ids2 = [a["id"] for a in resp2.json()["items"]]
         assert test_data["asset_alice_bob"] not in ids2
         assert test_data["asset_other_alice"] in ids2
 
