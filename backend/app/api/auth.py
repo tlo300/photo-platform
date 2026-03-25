@@ -289,7 +289,7 @@ async def login(
         secure=settings.cookie_secure,
         samesite="strict",
         max_age=settings.refresh_token_expire_days * 86400,
-        path="/auth/refresh",
+        path="/",
     )
 
     return TokenResponse(access_token=create_access_token(str(user.id)))
@@ -346,7 +346,7 @@ async def refresh(
         secure=settings.cookie_secure,
         samesite="strict",
         max_age=settings.refresh_token_expire_days * 86400,
-        path="/auth/refresh",
+        path="/",
     )
 
     return TokenResponse(access_token=create_access_token(str(record.user_id)))
