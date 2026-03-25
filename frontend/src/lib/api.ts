@@ -204,6 +204,37 @@ export async function getImportJob(
   return res.json();
 }
 
+export interface AssetItem {
+  id: string;
+  original_filename: string;
+  mime_type: string;
+  captured_at: string | null;
+  thumbnail_ready: boolean;
+  thumbnail_url: string | null;
+}
+
+export interface AssetsPage {
+  items: AssetItem[];
+  next_cursor: string | null;
+}
+
+export async function getAssets(
+  token: string,
+  cursor?: string,
+  limit = 50
+): Promise<AssetsPage> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (cursor) params.set("cursor", cursor);
+  const res = await fetch(`${CLIENT_API_URL}/assets?${params}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error((data as { detail?: string }).detail ?? "Failed to load assets");
+  }
+  return res.json();
+}
+
 export async function createInvitation(
   token: string,
   email: string
