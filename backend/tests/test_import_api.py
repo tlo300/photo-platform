@@ -215,11 +215,8 @@ async def test_start_import_returns_job_id(user_token: str):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.post(
                 IMPORT_URL,
-                content=_TINY_ZIP,
-                headers={
-                    "Authorization": f"Bearer {user_token}",
-                    "Content-Type": "application/zip",
-                },
+                files={"file": ("archive.zip", _TINY_ZIP, "application/zip")},
+                headers={"Authorization": f"Bearer {user_token}"},
             )
 
     assert resp.status_code == 202, resp.text
@@ -234,8 +231,7 @@ async def test_start_import_unauthenticated():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post(
             IMPORT_URL,
-            content=_TINY_ZIP,
-            headers={"Content-Type": "application/zip"},
+            files={"file": ("archive.zip", _TINY_ZIP, "application/zip")},
         )
     assert resp.status_code == 401
 
@@ -249,11 +245,8 @@ async def test_start_import_oversized(user_token: str):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.post(
                 IMPORT_URL,
-                content=_TINY_ZIP,  # larger than 10 bytes
-                headers={
-                    "Authorization": f"Bearer {user_token}",
-                    "Content-Type": "application/zip",
-                },
+                files={"file": ("archive.zip", _TINY_ZIP, "application/zip")},
+                headers={"Authorization": f"Bearer {user_token}"},
             )
     assert resp.status_code == 413
 
@@ -266,11 +259,8 @@ async def test_start_import_non_zip_content(user_token: str):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post(
             IMPORT_URL,
-            content=not_a_zip,
-            headers={
-                "Authorization": f"Bearer {user_token}",
-                "Content-Type": "application/zip",
-            },
+            files={"file": ("notzip.bin", not_a_zip, "application/zip")},
+            headers={"Authorization": f"Bearer {user_token}"},
         )
     assert resp.status_code == 400
 
@@ -293,11 +283,8 @@ async def created_job_id(user_token: str, migrator_engine) -> str:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.post(
                 IMPORT_URL,
-                content=_TINY_ZIP,
-                headers={
-                    "Authorization": f"Bearer {user_token}",
-                    "Content-Type": "application/zip",
-                },
+                files={"file": ("archive.zip", _TINY_ZIP, "application/zip")},
+                headers={"Authorization": f"Bearer {user_token}"},
             )
     assert resp.status_code == 202
     return resp.json()["job_id"]

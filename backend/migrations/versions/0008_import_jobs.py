@@ -20,8 +20,6 @@ APP_USER = "app_user"
 
 
 def upgrade() -> None:
-    op.execute("CREATE TYPE import_job_status AS ENUM ('pending', 'processing', 'done', 'failed')")
-
     op.create_table(
         "import_jobs",
         sa.Column(
@@ -33,7 +31,7 @@ def upgrade() -> None:
         sa.Column("owner_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column(
             "status",
-            sa.Enum("pending", "processing", "done", "failed", name="import_job_status", create_type=False),
+            sa.Enum("pending", "processing", "done", "failed", name="import_job_status"),
             nullable=False,
             server_default="pending",
         ),
