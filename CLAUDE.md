@@ -79,10 +79,30 @@ Update this section at the end of every working session.
 
 ```
 Active milestone : 4 – Photo library and browsing
-Last completed  : #24 Timeline grid UI (PR #87, 2026-03-25)
+Last completed  : #25 Asset detail view (PR pending, 2026-03-25)
 In progress     : (none)
 Blocked         : (none)
 ```
+
+### Handoff — 2026-03-25 (#25 Asset detail view)
+**Completed:**
+- `GET /assets/{id}` endpoint: full-res presigned URL, metadata (make/model/dims/duration),
+  GPS location (lat/lng from PostGIS ST_X/ST_Y), tags with source
+- Frontend `/assets/[id]` page: full-res image or inline video, metadata sidebar,
+  OSM embed iframe for GPS, tag badges with source label, sticky back button
+- Scroll position save/restore via sessionStorage (grid → detail → back)
+- 5 integration tests: happy path, bare asset (nulls), 404, RLS isolation, 401
+
+**Gotchas:**
+- `MediaMetadata` does not have ISO/aperture/shutter speed — those fields don't exist yet
+  (issue #88 will add them via a backfill task)
+- GPS extracted from PostGIS using `ST_Y(point)` = latitude, `ST_X(point)` = longitude
+- `geoalchemy2.functions` (ST_X, ST_Y) imported in assets.py — already in requirements
+- OSM embed iframe uses the official `openstreetmap.org/export/embed.html` — no npm mapping lib needed
+- `worker` label doesn't exist in the repo (skipped when creating issue #88)
+
+**Suggested next step:** Run tests (`pytest tests/test_asset_detail.py -v`), then open PR and
+move to #26 Basic search or #88 Metadata backfill.
 
 ## Issue status
 Update the status column as issues progress.
@@ -119,7 +139,7 @@ Update the status column as issues progress.
 | #22   | Library API (paginated timeline)         | 4         | pr-open |
 | #23   | Thumbnail generation worker              | 4         | merged  |
 | #24   | Timeline grid UI                         | 4         | pr-open |
-| #25   | Asset detail view                        | 4         | backlog |
+| #25   | Asset detail view                        | 4         | pr-open |
 | #26   | Basic search                             | 4         | backlog |
 | #27   | Albums API (CRUD)                        | 5         | backlog |
 | #28   | Google Takeout album import              | 5         | backlog |

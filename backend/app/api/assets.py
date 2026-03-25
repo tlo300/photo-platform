@@ -1,9 +1,10 @@
 """Assets API: paginated timeline and filtering for the authenticated user's media assets.
 
 Endpoints:
-  GET /assets  — paginated timeline ordered by captured_at DESC, id DESC.
-                 Optional filters: person, date_from, date_to, media_type, has_location.
-                 Cursor-based pagination; each response includes a next_cursor field.
+  GET /assets       — paginated timeline ordered by captured_at DESC, id DESC.
+                      Optional filters: person, date_from, date_to, media_type, has_location.
+                      Cursor-based pagination; each response includes a next_cursor field.
+  GET /assets/{id}  — full detail for a single asset: presigned URL, metadata, location, tags.
 """
 
 import base64
@@ -12,14 +13,15 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+from geoalchemy2.functions import ST_X, ST_Y
 from pydantic import BaseModel
 from sqlalchemy import exists, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import get_current_user
 from app.db import get_authed_session
-from app.models.media import Location, MediaAsset
+from app.models.media import Location, MediaAsset, MediaMetadata
 from app.models.tag import AssetTag, Tag
 from app.services.storage import StorageError, storage_service
 
@@ -51,6 +53,36 @@ class AssetItem(BaseModel):
 class PagedAssetResponse(BaseModel):
     items: list[AssetItem]
     next_cursor: str | None
+
+
+class AssetMetadata(BaseModel):
+    make: str | None
+    model: str | None
+    width_px: int | None
+    height_px: int | None
+    duration_seconds: float | None
+
+
+class AssetLocation(BaseModel):
+    latitude: float
+    longitude: float
+
+
+class AssetTagItem(BaseModel):
+    name: str
+    source: str | None
+
+
+class AssetDetail(BaseModel):
+    id: uuid.UUID
+    original_filename: str
+    mime_type: str
+    captured_at: datetime | None
+    full_url: str
+    thumbnail_url: str | None
+    metadata: AssetMetadata | None
+    location: AssetLocation | None
+    tags: list[AssetTagItem]
 
 
 # ---------------------------------------------------------------------------
@@ -233,3 +265,74 @@ async def list_assets(
     ]
 
     return PagedAssetResponse(items=items, next_cursor=next_cursor)
+
+
+@router.get("/{asset_id}", response_model=AssetDetail)
+async def get_asset(
+    asset_id: uuid.UUID = Path(..., description="Asset UUID"),
+    user_id: uuid.UUID = Depends(get_current_user),
+    session: AsyncSession = Depends(get_authed_session),
+) -> AssetDetail:
+    """Return full detail for a single asset owned by the authenticated user.
+
+    Returns 404 if the asset does not exist or belongs to another user (RLS
+    enforces ownership; the explicit owner_id filter is defence-in-depth).
+    """
+    # Fetch the asset (RLS + explicit owner filter).
+    asset_stmt = select(MediaAsset).where(
+        MediaAsset.id == asset_id,
+        MediaAsset.owner_id == user_id,
+    )
+    asset: MediaAsset | None = await session.scalar(asset_stmt)
+    if asset is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found.")
+
+    # Metadata (optional — row may not exist for older assets).
+    meta_stmt = select(MediaMetadata).where(MediaMetadata.asset_id == asset_id)
+    meta: MediaMetadata | None = await session.scalar(meta_stmt)
+
+    # Location — extract lat/lng from the PostGIS point.
+    loc_stmt = select(
+        ST_Y(Location.point).label("latitude"),
+        ST_X(Location.point).label("longitude"),
+    ).where(Location.asset_id == asset_id)
+    loc_row = (await session.execute(loc_stmt)).one_or_none()
+
+    # Tags for this asset.
+    tags_stmt = (
+        select(Tag.name, AssetTag.source)
+        .join(AssetTag, AssetTag.tag_id == Tag.id)
+        .where(AssetTag.asset_id == asset_id)
+        .order_by(Tag.name)
+    )
+    tag_rows = list(await session.execute(tags_stmt))
+
+    # Presigned full-resolution URL.
+    try:
+        full_url = storage_service.generate_presigned_url(str(user_id), asset.storage_key)
+    except StorageError:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Could not generate download URL.",
+        )
+
+    return AssetDetail(
+        id=asset.id,
+        original_filename=asset.original_filename,
+        mime_type=asset.mime_type,
+        captured_at=asset.captured_at,
+        full_url=full_url,
+        thumbnail_url=_thumbnail_url(user_id, asset.id, asset.thumbnail_ready),
+        metadata=AssetMetadata(
+            make=meta.make,
+            model=meta.model,
+            width_px=meta.width_px,
+            height_px=meta.height_px,
+            duration_seconds=meta.duration_seconds,
+        ) if meta is not None else None,
+        location=AssetLocation(
+            latitude=float(loc_row.latitude),
+            longitude=float(loc_row.longitude),
+        ) if loc_row is not None else None,
+        tags=[AssetTagItem(name=row.name, source=row.source) for row in tag_rows],
+    )
