@@ -79,7 +79,7 @@ Update this section at the end of every working session.
 
 ```
 Active milestone : 3 – Google Takeout import pipeline
-Last completed  : #18 Google Takeout sidecar parser (pr-open)
+Last completed  : #19 EXIF extraction from image/video files (pr-open)
 In progress     : (none)
 Blocked         : (none)
 ```
@@ -107,7 +107,7 @@ Update the status column as issues progress.
 | #16   | Sharing data model and API foundation    | 2a        | pr-open |
 | #17   | Dependency scanning and security CI      | 2a        | pr-open |
 | #18   | Google Takeout sidecar parser            | 3         | pr-open |
-| #19   | EXIF extraction from image/video files   | 3         | backlog |
+| #19   | EXIF extraction from image/video files   | 3         | pr-open |
 | #20   | Takeout zip upload and ingestion         | 3         | backlog |
 | #21   | Import progress UI                       | 3         | backlog |
 | #22   | Library API (paginated timeline)         | 4         | backlog |
