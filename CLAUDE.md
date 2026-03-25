@@ -79,7 +79,7 @@ Update this section at the end of every working session.
 
 ```
 Active milestone : 4 – Photo library and browsing
-Last completed  : #23 Thumbnail generation worker (merged 2026-03-25)
+Last completed  : #24 Timeline grid UI (PR #87, 2026-03-25)
 In progress     : (none)
 Blocked         : (none)
 ```
@@ -118,7 +118,7 @@ Update the status column as issues progress.
 | #75   | Preserve Takeout folder structure as albums | 3      | merged  |
 | #22   | Library API (paginated timeline)         | 4         | pr-open |
 | #23   | Thumbnail generation worker              | 4         | merged  |
-| #24   | Timeline grid UI                         | 4         | backlog |
+| #24   | Timeline grid UI                         | 4         | pr-open |
 | #25   | Asset detail view                        | 4         | backlog |
 | #26   | Basic search                             | 4         | backlog |
 | #27   | Albums API (CRUD)                        | 5         | backlog |
