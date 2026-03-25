@@ -79,10 +79,40 @@ Update this section at the end of every working session.
 
 ```
 Active milestone : 4 – Photo library and browsing
-Last completed  : #43 GPS location storage and geo-based browsing API (PR pending, 2026-03-25)
+Last completed  : #88 Metadata backfill (PR pending, 2026-03-25)
 In progress     : (none)
 Blocked         : (none)
 ```
+
+### Handoff — 2026-03-25 (#88 Metadata backfill)
+**Completed:**
+- Migration 0016: added `iso` (Integer), `aperture` (Float), `shutter_speed` (Float, seconds),
+  `focal_length` (Float, mm), `flash` (Boolean) to `media_metadata`
+- `ExifResult` now has all new fields + `gps_latitude/longitude/altitude` + `duration_seconds`;
+  all default to None for backward compatibility
+- `extract_exif` reads new Exif sub-IFD tags (33434/33437/34855/37385/37386) + GPS IFD (34853)
+  for images; uses `ffprobe` subprocess for video width/height/duration
+- `apply_exif` upserts all new fields including `duration_seconds` (previously ignored)
+- New `metadata.backfill_user` Celery task: sets RLS, queries all assets, fans out
+  `metadata.backfill_asset` tasks
+- New `metadata.backfill_asset` Celery task: downloads original, re-extracts metadata, upserts
+  `media_metadata`, inserts `locations` from EXIF GPS only if no location row exists
+- `POST /admin/backfill-metadata?user_id=<optional>` admin endpoint — enqueues per-user tasks,
+  returns `{"enqueued": N}` (count of user tasks)
+- 32 new unit tests across test_exif.py and test_metadata_backfill.py
+
+**Gotchas:**
+- Pillow does not reliably round-trip sub-IFD data for freshly created images; extended EXIF
+  field tests use `patch("app.services.exif.Image.open")` to inject mock EXIF data
+- `ExifResult` fields all have `default=None` — positional construction still works but
+  callers that use keyword arguments (takeout_tasks, merge_metadata tests) are unaffected
+- GPS → location upsert is backfill-task-only; `apply_exif` stays focused on `media_metadata`
+  so the import pipeline (takeout_tasks.py) doesn't gain unexpected GPS writes
+- Admin endpoint queries `users` table (no RLS) to enumerate user IDs; each Celery task sets
+  its own RLS via `SET LOCAL app.current_user_id`
+
+**Suggested next step:** Open PR for #88, then move to #27 Albums API or #92 Extend search
+to EXIF metadata fields.
 
 ### Handoff — 2026-03-25 (#43 GPS location storage and geo-based browsing API)
 **Completed:**
@@ -137,8 +167,7 @@ Blocked         : (none)
 - 5 integration tests: happy path, bare asset (nulls), 404, RLS isolation, 401
 
 **Gotchas:**
-- `MediaMetadata` does not have ISO/aperture/shutter speed — those fields don't exist yet
-  (issue #88 will add them via a backfill task)
+- `MediaMetadata` now has ISO/aperture/shutter_speed/focal_length/flash (added in #88)
 - GPS extracted from PostGIS using `ST_Y(point)` = latitude, `ST_X(point)` = longitude
 - `geoalchemy2.functions` (ST_X, ST_Y) imported in assets.py — already in requirements
 - OSM embed iframe uses the official `openstreetmap.org/export/embed.html` — no npm mapping lib needed
@@ -185,6 +214,7 @@ Update the status column as issues progress.
 | #24   | Timeline grid UI                         | 4         | pr-open |
 | #25   | Asset detail view                        | 4         | pr-open |
 | #26   | Basic search                             | 4         | pr-open |
+| #88   | Metadata backfill                        | 4         | pr-open |
 | #92   | Extend search to EXIF metadata fields    | 4         | backlog |
 | #27   | Albums API (CRUD)                        | 5         | backlog |
 | #28   | Google Takeout album import              | 5         | backlog |
