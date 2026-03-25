@@ -184,8 +184,10 @@ def _insert_asset(
     display_name: str | None = None,
     country: str | None = None,
     captured_at: datetime | None = None,
+    make: str | None = None,
+    model: str | None = None,
 ) -> str:
-    """Insert an asset with optional description, tag, and location. Returns asset UUID."""
+    """Insert an asset with optional description, tag, location, and camera metadata. Returns asset UUID."""
     asset_id = str(uuid.uuid4())
     storage_key = f"{owner_id}/{asset_id}/original.jpg"
     checksum = hashlib.sha256(asset_id.encode()).hexdigest()
@@ -211,6 +213,15 @@ def _insert_asset(
                 "cat": cat,
             },
         )
+
+        if make or model:
+            conn.execute(
+                text(
+                    "INSERT INTO media_metadata (asset_id, make, model)"
+                    " VALUES (:asset_id, :make, :model)"
+                ),
+                {"asset_id": asset_id, "make": make, "model": model},
+            )
 
         if tag:
             # Upsert tag then link it.
@@ -404,3 +415,39 @@ async def test_unauthenticated_returns_401():
         resp = await client.get(SEARCH_URL, params={"q": "sunset"})
 
     assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_search_by_camera_make(migrator_engine, user_token):
+    owner_id = _owner_id(migrator_engine, user_token)
+    asset_id = _insert_asset(migrator_engine, owner_id, make="Sony")
+
+    with patch("app.services.storage.storage_service.generate_presigned_url", return_value="http://fake/thumb"):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.get(
+                SEARCH_URL,
+                params={"q": "Sony"},
+                headers={"Authorization": f"Bearer {user_token}"},
+            )
+
+    assert resp.status_code == 200
+    ids = [i["id"] for i in resp.json()["items"]]
+    assert asset_id in ids
+
+
+@pytest.mark.asyncio
+async def test_search_by_camera_model(migrator_engine, user_token):
+    owner_id = _owner_id(migrator_engine, user_token)
+    asset_id = _insert_asset(migrator_engine, owner_id, make="Canon", model="EOS R5")
+
+    with patch("app.services.storage.storage_service.generate_presigned_url", return_value="http://fake/thumb"):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.get(
+                SEARCH_URL,
+                params={"q": "EOS R5"},
+                headers={"Authorization": f"Bearer {user_token}"},
+            )
+
+    assert resp.status_code == 200
+    ids = [i["id"] for i in resp.json()["items"]]
+    assert asset_id in ids
