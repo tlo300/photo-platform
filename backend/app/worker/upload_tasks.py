@@ -387,6 +387,13 @@ async def _run_direct_upload(job_id: uuid.UUID, owner_id: uuid.UUID) -> None:
                 rel_path: str = entry.get("rel_path", "")
 
                 parsed_sidecar = sidecar_lookup.get(filename.lower())
+                # Live photo companion fallback: MP4/MOV shares stem with HEIC/HEIF sidecar.
+                if parsed_sidecar is None:
+                    _stem = PurePosixPath(filename).stem.lower()
+                    for _photo_ext in (".heic", ".heif", ".jpg", ".jpeg"):
+                        parsed_sidecar = sidecar_lookup.get(_stem + _photo_ext)
+                        if parsed_sidecar is not None:
+                            break
 
                 # Download staged file from S3
                 try:

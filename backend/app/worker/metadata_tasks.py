@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from pathlib import PurePosixPath
 
 from geoalchemy2.functions import ST_MakePoint
 from sqlalchemy import select, text
@@ -155,6 +156,68 @@ def backfill_user_metadata(self, owner_id: str) -> None:
         backfill_asset_metadata.delay(str(asset_id), owner_id)
 
     logger.info("Backfill: enqueued %d asset task(s) for user %s", count, owner_id)
+
+
+@celery_app.task(name="backfill.live_photo_dates", bind=True, max_retries=0)
+def backfill_live_photo_dates(self, owner_id: str) -> None:
+    """Fix captured_at on live photo MP4/MOV assets imported without a sidecar.
+
+    For each video asset (MP4/MOV) with sidecar_missing=True, finds a photo
+    asset (HEIC/HEIF/JPEG) owned by the same user whose original_filename stem
+    matches.  Copies captured_at from the photo to the video and clears
+    sidecar_missing.  Idempotent — safe to re-run.
+    """
+    asyncio.run(_run_live_photo_backfill(uuid.UUID(owner_id)))
+
+
+async def _run_live_photo_backfill(owner_id: uuid.UUID) -> None:
+    engine = create_async_engine(settings.database_url, pool_pre_ping=True)
+    try:
+        async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+            await _set_rls(session, owner_id)
+
+            video_rows = await session.scalars(
+                select(MediaAsset).where(
+                    MediaAsset.owner_id == owner_id,
+                    MediaAsset.mime_type.in_(["video/mp4", "video/quicktime"]),
+                    MediaAsset.sidecar_missing == True,  # noqa: E712
+                )
+            )
+            videos = list(video_rows)
+            if not videos:
+                logger.info("Live photo backfill: no sidecar_missing videos for user %s", owner_id)
+                return
+
+            photo_rows = await session.scalars(
+                select(MediaAsset).where(
+                    MediaAsset.owner_id == owner_id,
+                    MediaAsset.mime_type.in_(["image/heic", "image/heif", "image/jpeg", "image/png"]),
+                    MediaAsset.sidecar_missing == False,  # noqa: E712
+                    MediaAsset.captured_at.is_not(None),
+                )
+            )
+            # Build stem → captured_at map from photos that have a sidecar date.
+            photo_stem_map: dict[str, object] = {}
+            for photo in photo_rows:
+                stem = PurePosixPath(photo.original_filename).stem.lower()
+                photo_stem_map[stem] = photo.captured_at
+
+            updated = 0
+            for video in videos:
+                stem = PurePosixPath(video.original_filename).stem.lower()
+                photo_date = photo_stem_map.get(stem)
+                if photo_date is not None:
+                    video.captured_at = photo_date
+                    video.sidecar_missing = False
+                    updated += 1
+
+            await session.commit()
+            logger.info(
+                "Live photo backfill: updated %d / %d video assets for user %s",
+                updated, len(videos), owner_id,
+            )
+    finally:
+        await engine.dispose()
 
 
 @celery_app.task(
