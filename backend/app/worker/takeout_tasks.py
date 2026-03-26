@@ -24,6 +24,7 @@ import io
 import json
 import logging
 import os
+import re
 import tempfile
 import uuid
 import zipfile
@@ -47,8 +48,24 @@ from app.worker.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
 
+# Matches "Photos from 2003" (and variants) anywhere in a file path.
+_PHOTOS_FROM_YEAR_RE = re.compile(r"\bphotos?\s+from\s+(\d{4})\b", re.IGNORECASE)
+
+
+def _folder_year(path: str) -> int | None:
+    """Return the year embedded in a 'Photos from YYYY' path component, or None."""
+    m = _PHOTOS_FROM_YEAR_RE.search(path)
+    if m:
+        year = int(m.group(1))
+        if 1900 <= year <= 2100:
+            return year
+    return None
+
+
 # Sidecar extension used by Google Takeout
 _SIDECAR_EXT = ".json"
+# Older / region-specific Takeout exports use this suffix instead of ".json".
+_SUPPLEMENTAL_SIDECAR_EXT = ".supplemental-metadata.json"
 
 # Google Takeout truncates filenames to 46 characters (before the extension)
 # when creating sidecar names for files with long names.
@@ -215,8 +232,12 @@ def _build_album_index(zf: zipfile.ZipFile) -> _AlbumIndex:
             data = json.loads(zf.read(name).decode("utf-8", errors="replace"))
             ts_raw = data.get("photoTakenTime", {}).get("timestamp", "0")
             ts = int(ts_raw)
-            # Strip the trailing ".json" to get the media filename
-            media_basename = PurePosixPath(name[: -len(_SIDECAR_EXT)]).name
+            # Strip the sidecar suffix to get the media filename.
+            # Handle both "photo.jpg.supplemental-metadata.json" and "photo.jpg.json".
+            if name.lower().endswith(_SUPPLEMENTAL_SIDECAR_EXT):
+                media_basename = PurePosixPath(name[: -len(_SUPPLEMENTAL_SIDECAR_EXT)]).name
+            else:
+                media_basename = PurePosixPath(name[: -len(_SIDECAR_EXT)]).name
             folder_timestamps.setdefault(folder, {})[media_basename] = ts
         except Exception:
             pass
@@ -471,9 +492,15 @@ async def _ingest_one(
             # EXIF extraction
             exif_result = extract_exif(data, mime)
 
-            # Sidecar lookup — try standard name then truncated variant
+            # Sidecar lookup — try standard ".json" name, truncated variant, and the
+            # ".supplemental-metadata.json" variant used by some Takeout exports.
             sidecar_data: dict | None = None
-            for candidate in (_sidecar_name(media_name), _sidecar_name(Path(media_name).name)):
+            for candidate in (
+                _sidecar_name(media_name),
+                _sidecar_name(Path(media_name).name),
+                media_name + _SUPPLEMENTAL_SIDECAR_EXT,
+                Path(media_name).name + _SUPPLEMENTAL_SIDECAR_EXT,
+            ):
                 if candidate.lower() in sidecar_set:
                     try:
                         raw_bytes = zf.read(candidate) if candidate in zf.namelist() else None
@@ -498,7 +525,17 @@ async def _ingest_one(
             # Resolve captured_at via the canonical merge strategy
             canonical = merge_metadata(exif_result, parsed_sidecar)
             if canonical.captured_at is not None:
-                asset.captured_at = canonical.captured_at
+                captured = canonical.captured_at
+                # No sidecar: try to correct a wrong camera-clock year using the
+                # "Photos from YYYY" folder name (Google Takeout convention).
+                if not sidecar_found:
+                    year = _folder_year(media_name)
+                    if year and year != captured.year:
+                        try:
+                            captured = captured.replace(year=year)
+                        except ValueError:
+                            pass  # e.g. Feb 29 in a non-leap year — keep original
+                asset.captured_at = captured
             elif not sidecar_found:
                 # Neither sidecar nor EXIF provided a date — fall back to the
                 # zip entry's last-modified timestamp as a last resort.

@@ -25,7 +25,8 @@ const BATCH_SIZE = 200; // max files per POST request
 
 // Google Takeout sidecar JSONs — always sent to the backend even on re-upload
 // so the worker can fix captured_at on existing assets.
-const SIDECAR_JSON = /\.(jpg|jpeg|heic|heif|png|webp|gif|mp4|mov|avi|mkv)\.json$/i;
+// Matches both "photo.jpg.json" and "photo.jpg.supplemental-metadata.json".
+const SIDECAR_JSON = /\.(jpg|jpeg|heic|heif|png|webp|gif|mp4|mov|avi|mkv)(\.supplemental-metadata)?\.json$/i;
 
 // Fingerprint a file by its relative path + size — good enough to skip re-uploads on retry.
 function fingerprint(file: File): string {

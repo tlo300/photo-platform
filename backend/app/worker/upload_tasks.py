@@ -26,6 +26,7 @@ import hashlib
 import io
 import json
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import PurePosixPath
@@ -47,6 +48,19 @@ from app.services.upload_validation import ALLOWED_MIME_TYPES
 from app.worker.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
+
+# Matches "Photos from 2003" (and variants) anywhere in a file path.
+_PHOTOS_FROM_YEAR_RE = re.compile(r"\bphotos?\s+from\s+(\d{4})\b", re.IGNORECASE)
+
+
+def _folder_year(path: str) -> int | None:
+    """Return the year embedded in a 'Photos from YYYY' path component, or None."""
+    m = _PHOTOS_FROM_YEAR_RE.search(path)
+    if m:
+        year = int(m.group(1))
+        if 1900 <= year <= 2100:
+            return year
+    return None
 
 _SUFFIX_MAP: dict[str, str] = {
     "image/jpeg": ".jpg",
@@ -255,7 +269,17 @@ async def _ingest_one(
             exif_result = extract_exif(data, mime)
             canonical = merge_metadata(exif_result, parsed_sidecar)
             if canonical.captured_at is not None:
-                asset.captured_at = canonical.captured_at
+                captured = canonical.captured_at
+                # No sidecar: try to correct a wrong camera-clock year using the
+                # "Photos from YYYY" folder name (Google Takeout convention).
+                if parsed_sidecar is None:
+                    year = _folder_year(rel_path)
+                    if year and year != captured.year:
+                        try:
+                            captured = captured.replace(year=year)
+                        except ValueError:
+                            pass  # e.g. Feb 29 in a non-leap year — keep original
+                asset.captured_at = captured
             else:
                 asset.captured_at = datetime.now(timezone.utc)
                 asset.sidecar_missing = True
@@ -327,7 +351,15 @@ async def _run_direct_upload(job_id: uuid.UUID, owner_id: uuid.UUID) -> None:
             for entry in sidecar_entries:
                 key: str = entry["key"]
                 filename: str = entry.get("filename", "")
-                media_filename = filename[:-5] if filename.lower().endswith(".json") else filename
+                # Strip the sidecar suffix to get the media filename.
+                # "photo.jpg.supplemental-metadata.json" → "photo.jpg"
+                # "photo.jpg.json" → "photo.jpg"
+                if filename.lower().endswith(".supplemental-metadata.json"):
+                    media_filename = filename[: -len(".supplemental-metadata.json")]
+                elif filename.lower().endswith(".json"):
+                    media_filename = filename[:-5]
+                else:
+                    media_filename = filename
                 try:
                     buf = io.BytesIO()
                     storage_service._client.download_fileobj(
