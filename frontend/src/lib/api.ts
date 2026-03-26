@@ -209,7 +209,7 @@ export function startDirectUpload(
   files: File[],
   paths: string[],
   albumId: string | null,
-  onUploadProgress: (percent: number) => void
+  onUploadProgress: (percent: number, loaded: number, total: number) => void
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -231,7 +231,7 @@ export function startDirectUpload(
 
     xhr.upload.addEventListener("progress", (e) => {
       if (e.lengthComputable) {
-        onUploadProgress(Math.round((e.loaded / e.total) * 100));
+        onUploadProgress(Math.round((e.loaded / e.total) * 100), e.loaded, e.total);
       }
     });
 
