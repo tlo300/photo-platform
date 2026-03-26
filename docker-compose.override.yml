@@ -1,0 +1,23 @@
+# Development overrides — loaded automatically by `docker compose up`.
+# Mounts source code into containers for hot reload and uses the dev Caddyfile.
+# Never reference this file in production.
+
+services:
+
+  backend:
+    volumes:
+      - ./backend:/app
+
+  worker:
+    volumes:
+      - ./backend:/app
+
+  frontend:
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+
+  caddy:
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro

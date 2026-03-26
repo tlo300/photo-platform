@@ -78,11 +78,26 @@ When making a non-obvious technical decision, create docs/decisions/NNN-short-ti
 Update this section at the end of every working session.
 
 ```
-Active milestone : 5 – Albums and organisation
-Last completed  : #29 Albums UI (PR #112, 2026-03-26)
+Active milestone : 6 – European server migration readiness
+Last completed  : #30 Production Docker Compose config (PR #114, 2026-03-26)
 In progress     : (none)
 Blocked         : (none)
 ```
+
+### Handoff — 2026-03-26 (#30 Production Docker Compose config)
+**Completed:**
+- `docker-compose.override.yml` (new): dev hot-reload mounts for backend/worker/frontend + dev Caddyfile; auto-loaded by `docker compose up`
+- `docker-compose.yml`: stripped of dev volume mounts — now the production-safe base
+- `docker-compose.prod.yml` (new): PgBouncer service, DATABASE_URL override pointing to `pgbouncer:5432`, `Caddyfile.prod` mount, `caddy_data`/`caddy_config` volumes for Let's Encrypt certs, MinIO console disabled
+- `.env.example`: added `DOMAIN` variable with production notes
+
+**Gotchas:**
+- PgBouncer uses **session mode** (not transaction) to avoid asyncpg prepared-statement conflict. `SET LOCAL app.current_user_id` resets at transaction end — same behaviour as before, no code changes needed.
+- `DISCARD ALL` is set as `SERVER_RESET_QUERY` so PgBouncer resets session state when a client disconnects — important for correctness in session mode.
+- `DATABASE_MIGRATOR_URL` still points directly to `db:5432` (not through PgBouncer) — migrations run schema changes that need a persistent session with superuser-level access.
+- Dev workflow unchanged: `docker compose up` still works as before.
+
+**Suggested next step:** #31 S3-compatible storage abstraction or #32 Deployment runbook.
 
 ### Handoff — 2026-03-26 (#29 Albums UI)
 **Completed:**
@@ -285,7 +300,7 @@ Update the status column as issues progress.
 | #27   | Albums API (CRUD)                        | 5         | pr-open |
 | #28   | Google Takeout album import              | 5         | pr-open |
 | #29   | Albums UI                                | 5         | pr-open |
-| #30   | Production Docker Compose config         | 6         | backlog |
+| #30   | Production Docker Compose config         | 6         | pr-open |
 | #31   | S3-compatible storage abstraction        | 6         | backlog |
 | #32   | Deployment runbook                       | 6         | backlog |
 
