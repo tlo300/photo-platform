@@ -1,7 +1,8 @@
 # Dev reverse proxy — routes traffic to backend and frontend containers.
-# No TLS in dev; Caddy listens on :80 only.
+# No TLS in dev; Caddy listens on :8080 to avoid conflicts with other
+# processes that may hold port 80 on the Windows host (e.g. IIS, Skype).
 
-:80 {
+:8080 {
     # API — proxy to FastAPI backend
     handle /api/* {
         uri strip_prefix /api

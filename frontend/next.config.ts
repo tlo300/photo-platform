@@ -24,6 +24,10 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  // Allow dev-server resources (HMR) when accessed via 127.0.0.1 —
+  // needed on Windows when another process occupies localhost:80 on IPv6.
+  allowedDevOrigins: ["127.0.0.1"],
+
   async headers() {
     return [
       {

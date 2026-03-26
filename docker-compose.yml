@@ -133,8 +133,7 @@ services:
     image: caddy:2-alpine
     restart: unless-stopped
     ports:
-      - "80:80"
-      - "443:443"
+      - "8080:8080"
     networks:
       - photo-net
     depends_on:
