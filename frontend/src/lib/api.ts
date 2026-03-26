@@ -318,6 +318,9 @@ export interface AssetItem {
   captured_at: string | null;
   thumbnail_ready: boolean;
   thumbnail_url: string | null;
+  width: number | null;
+  height: number | null;
+  locality: string | null;
 }
 
 export interface AssetsPage {

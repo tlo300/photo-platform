@@ -653,3 +653,79 @@ async def test_invalid_cursor_returns_400(user_token):
                 headers={"Authorization": f"Bearer {user_token}"},
             )
     assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_width_height_null_without_metadata(user_token, test_data):
+    """Assets without a media_metadata row have width=null and height=null."""
+    with patch("app.api.assets.storage_service") as mock_storage:
+        mock_storage.generate_presigned_url.return_value = "https://example.com/thumb"
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.get(
+                ASSETS_URL,
+                params={"limit": 200},
+                headers={"Authorization": f"Bearer {user_token}"},
+            )
+
+    assert resp.status_code == 200, resp.text
+    items_by_id = {a["id"]: a for a in resp.json()["items"]}
+    # photo_t1 has no media_metadata row — width/height must be null
+    item = items_by_id[test_data["photo_t1"]]
+    assert item["width"] is None
+    assert item["height"] is None
+    # All items must have the keys present
+    for item in resp.json()["items"]:
+        assert "width" in item
+        assert "height" in item
+        assert "locality" in item
+
+
+@pytest.mark.asyncio
+async def test_width_height_locality_populated(migrator_engine, user_token, test_data):
+    """width/height come from media_metadata; locality comes from location.display_name."""
+    user_id = test_data["user_id"]
+    asset_id = test_data["photo_t3"]
+
+    # Insert media_metadata row with known dimensions.
+    with migrator_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO media_metadata (asset_id, width_px, height_px)"
+                " VALUES (:a, :w, :h)"
+                " ON CONFLICT (asset_id) DO UPDATE SET width_px = :w, height_px = :h"
+            ),
+            {"a": asset_id, "w": 4000, "h": 3000},
+        )
+        # Update the existing location row for photo_t2 to have a display_name.
+        conn.execute(
+            text(
+                "UPDATE locations SET display_name = 'Amsterdam'"
+                " WHERE asset_id = :a"
+            ),
+            {"a": test_data["photo_t2"]},
+        )
+
+    with patch("app.api.assets.storage_service") as mock_storage:
+        mock_storage.generate_presigned_url.return_value = "https://example.com/thumb"
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.get(
+                ASSETS_URL,
+                params={"limit": 200},
+                headers={"Authorization": f"Bearer {user_token}"},
+            )
+
+    assert resp.status_code == 200, resp.text
+    items_by_id = {a["id"]: a for a in resp.json()["items"]}
+
+    # photo_t3 now has metadata — width/height should be populated.
+    item_t3 = items_by_id[asset_id]
+    assert item_t3["width"] == 4000
+    assert item_t3["height"] == 3000
+
+    # photo_t2 has a location with display_name — locality should be "Amsterdam".
+    item_t2 = items_by_id[test_data["photo_t2"]]
+    assert item_t2["locality"] == "Amsterdam"
+
+    # photo_t1 has no location — locality must be null.
+    item_t1 = items_by_id[test_data["photo_t1"]]
+    assert item_t1["locality"] is None

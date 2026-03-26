@@ -55,6 +55,9 @@ class AssetItem(BaseModel):
     captured_at: datetime | None
     thumbnail_ready: bool
     thumbnail_url: str | None
+    width: int | None
+    height: int | None
+    locality: str | None
 
 
 class PagedAssetResponse(BaseModel):
@@ -182,8 +185,16 @@ async def list_assets(
     RLS ensures all results are scoped to the authenticated user.  The
     owner_id filter is applied at the query level as defence-in-depth.
     """
+    # Base select — always outjoin MediaMetadata for width/height.
+    # Location join is deferred: inner join when near is active, outerjoin otherwise.
     stmt = (
-        select(MediaAsset)
+        select(
+            MediaAsset,
+            MediaMetadata.width_px,
+            MediaMetadata.height_px,
+            Location.display_name.label("locality"),
+        )
+        .outerjoin(MediaMetadata, MediaMetadata.asset_id == MediaAsset.id)
         .where(MediaAsset.owner_id == user_id)
     )
 
@@ -224,6 +235,8 @@ async def list_assets(
 
     # Proximity filter — joins locations and filters by ST_DWithin (geography metres).
     # When active, cursor pagination is bypassed and results are ordered by distance.
+    # When active, Location is inner-joined (assets without GPS are excluded naturally).
+    # When inactive, Location is outer-joined below so locality is still populated.
     _near_geog = None
     _point_geog = None
     if near is not None:
@@ -247,11 +260,15 @@ async def list_assets(
             .join(Location, Location.asset_id == MediaAsset.id)
             .where(func.ST_DWithin(_point_geog, _near_geog, radius_km * 1000))
         )
+    else:
+        # Outerjoin Location so locality is populated for all assets.
+        stmt = stmt.outerjoin(Location, Location.asset_id == MediaAsset.id)
 
     if _near_geog is not None:
         # Distance ordering — no cursor pagination for geo queries.
         stmt = stmt.order_by(func.ST_Distance(_point_geog, _near_geog)).limit(limit)
-        page = list(await session.scalars(stmt))
+        rows = list(await session.execute(stmt))
+        page = rows
         next_cursor: str | None = None
     else:
         # Cursor — keyset pagination on (captured_at DESC NULLS LAST, id DESC).
@@ -265,7 +282,7 @@ async def list_assets(
         if cursor is not None:
             cursor_at, cursor_id = _decode_cursor(cursor)
             if cursor_at is not None:
-                from sqlalchemy import or_, and_, null
+                from sqlalchemy import and_
                 stmt = stmt.where(
                     or_(
                         MediaAsset.captured_at < cursor_at,
@@ -293,15 +310,15 @@ async def list_assets(
             .limit(limit + 1)
         )
 
-        rows = list(await session.scalars(stmt))
+        rows = list(await session.execute(stmt))
 
         has_next = len(rows) > limit
         page = rows[:limit]
 
         next_cursor = None
         if has_next:
-            last = page[-1]
-            next_cursor = _encode_cursor(last.captured_at, last.id)
+            last_asset, *_ = page[-1]
+            next_cursor = _encode_cursor(last_asset.captured_at, last_asset.id)
 
     items = [
         AssetItem(
@@ -311,8 +328,11 @@ async def list_assets(
             captured_at=asset.captured_at,
             thumbnail_ready=asset.thumbnail_ready,
             thumbnail_url=_thumbnail_url(user_id, asset.id, asset.thumbnail_ready),
+            width=width_px,
+            height=height_px,
+            locality=locality,
         )
-        for asset in page
+        for asset, width_px, height_px, locality in page
     ]
 
     return PagedAssetResponse(items=items, next_cursor=next_cursor)
@@ -336,7 +356,12 @@ async def search_assets(
     RLS ensures results are scoped to the authenticated user.
     """
     stmt = (
-        select(MediaAsset)
+        select(
+            MediaAsset,
+            MediaMetadata.width_px,
+            MediaMetadata.height_px,
+            Location.display_name.label("locality"),
+        )
         .outerjoin(Location, Location.asset_id == MediaAsset.id)
         .outerjoin(MediaMetadata, MediaMetadata.asset_id == MediaAsset.id)
         .where(MediaAsset.owner_id == user_id)
@@ -389,7 +414,7 @@ async def search_assets(
         )
 
     stmt = stmt.limit(limit)
-    rows = list(await session.scalars(stmt))
+    rows = list(await session.execute(stmt))
 
     items = [
         AssetItem(
@@ -399,8 +424,11 @@ async def search_assets(
             captured_at=asset.captured_at,
             thumbnail_ready=asset.thumbnail_ready,
             thumbnail_url=_thumbnail_url(user_id, asset.id, asset.thumbnail_ready),
+            width=width_px,
+            height=height_px,
+            locality=locality,
         )
-        for asset in rows
+        for asset, width_px, height_px, locality in rows
     ]
     return PagedAssetResponse(items=items, next_cursor=None)
 
