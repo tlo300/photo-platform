@@ -58,16 +58,31 @@ _SUFFIX_MAP: dict[str, str] = {
     "video/x-matroska": ".mkv",
 }
 
+# Extension fallback for video formats whose ISO-BMFF ftyp brands are not
+# fully covered by the filetype library (e.g. iPhone HEVC videos with M4V /
+# hvc1 brands, GoPro files with non-standard brands).
+_EXT_FALLBACK: dict[str, str] = {
+    ".mp4": "video/mp4",
+    ".mov": "video/quicktime",
+    ".avi": "video/x-msvideo",
+    ".mkv": "video/x-matroska",
+}
+
 
 def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def _detect_mime(data: bytes) -> str | None:
+def _detect_mime(data: bytes, filename: str = "") -> str | None:
     kind = _filetype.guess(data[:512])
-    if kind is None:
-        return None
-    return kind.mime if kind.mime in ALLOWED_MIME_TYPES else None
+    if kind is not None and kind.mime in ALLOWED_MIME_TYPES:
+        return kind.mime
+    # Fallback: trust file extension for video formats whose container
+    # variants are not fully covered by the filetype library.
+    if filename and "." in filename:
+        ext = "." + filename.rsplit(".", 1)[-1].lower()
+        return _EXT_FALLBACK.get(ext)
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -187,7 +202,7 @@ async def _ingest_one(
     staged_key: str | None = None
     try:
         async with session.begin_nested():
-            mime = _detect_mime(data)
+            mime = _detect_mime(data, filename)
             if mime is None:
                 raise ValueError("Unsupported or undetectable file type")
 

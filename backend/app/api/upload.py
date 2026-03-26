@@ -30,12 +30,14 @@ from fastapi import APIRouter, Depends, Request, UploadFile, status
 from fastapi.responses import JSONResponse
 from starlette.datastructures import UploadFile as StarletteUploadFile
 from pydantic import BaseModel
+from sqlalchemy import select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.dependencies import get_current_user
 from app.db import get_authed_session
 from app.models.import_job import ImportJob, ImportJobStatus
+from app.models.media import MediaAsset
 from app.services.storage import storage_service
 from app.services.upload_validation import ALLOWED_MIME_TYPES
 from app.worker.upload_tasks import process_direct_upload
@@ -58,6 +60,16 @@ _SUFFIX_MAP: dict[str, str] = {
     "video/x-matroska": ".mkv",
 }
 
+# Extension fallback for video formats whose ISO-BMFF ftyp brands are not
+# fully covered by the filetype library (e.g. iPhone HEVC videos with M4V /
+# hvc1 brands, GoPro files with non-standard brands).
+_EXT_FALLBACK: dict[str, str] = {
+    ".mp4": "video/mp4",
+    ".mov": "video/quicktime",
+    ".avi": "video/x-msvideo",
+    ".mkv": "video/x-matroska",
+}
+
 
 class StartUploadResponse(BaseModel):
     job_id: str
@@ -68,12 +80,17 @@ class FileError(BaseModel):
     reason: str
 
 
-def _detect_mime(data: bytes) -> str | None:
+def _detect_mime(data: bytes, filename: str = "") -> str | None:
     """Return detected MIME type or None if unsupported."""
     kind = _filetype.guess(data[:512])
-    if kind is None:
-        return None
-    return kind.mime if kind.mime in ALLOWED_MIME_TYPES else None
+    if kind is not None and kind.mime in ALLOWED_MIME_TYPES:
+        return kind.mime
+    # Fallback: trust file extension for video formats whose container
+    # variants are not fully covered by the filetype library.
+    if filename and "." in filename:
+        ext = "." + filename.rsplit(".", 1)[-1].lower()
+        return _EXT_FALLBACK.get(ext)
+    return None
 
 
 @router.post(
@@ -137,7 +154,7 @@ async def start_direct_upload(
 
         # MIME detection via magic bytes (not declared Content-Type — browsers
         # mis-report HEIC and other formats)
-        mime = _detect_mime(header)
+        mime = _detect_mime(header, filename)
         if mime is None:
             pre_errors.append(
                 {
@@ -215,3 +232,67 @@ async def start_direct_upload(
     process_direct_upload.delay(str(job_id), str(user_id))
 
     return StartUploadResponse(job_id=str(job_id))
+
+
+# ---------------------------------------------------------------------------
+# Preflight — check which files are already in the library
+# ---------------------------------------------------------------------------
+
+
+class PreflightFile(BaseModel):
+    path: str  # webkitRelativePath or filename
+    size: int  # bytes
+
+
+class PreflightRequest(BaseModel):
+    files: list[PreflightFile]
+
+
+class PreflightResponse(BaseModel):
+    already_uploaded: list[str]  # fingerprints in "path|size" format
+
+
+@router.post(
+    "/preflight",
+    status_code=status.HTTP_200_OK,
+    response_model=PreflightResponse,
+)
+async def upload_preflight(
+    body: PreflightRequest,
+    user_id: uuid.UUID = Depends(get_current_user),
+    session: AsyncSession = Depends(get_authed_session),
+) -> PreflightResponse:
+    """Return which files from the given list are already in the user's library.
+
+    Matches by original_filename (basename of the supplied path) and
+    file_size_bytes.  The returned fingerprints use the same ``path|size``
+    format as the upload page so they can be dropped straight into the
+    client-side done-set.
+    """
+    if not body.files:
+        return PreflightResponse(already_uploaded=[])
+
+    # Build a reverse-lookup from (basename, size) → [fingerprint, …].
+    # A folder may contain the same filename in multiple sub-directories, so
+    # one (basename, size) key can map to several client fingerprints.
+    lookup: dict[tuple[str, int], list[str]] = {}
+    for f in body.files:
+        name = f.path.rsplit("/", 1)[-1]
+        lookup.setdefault((name, f.size), []).append(f"{f.path}|{f.size}")
+
+    pairs = list(lookup.keys())
+
+    rows = (
+        await session.execute(
+            select(MediaAsset.original_filename, MediaAsset.file_size_bytes).where(
+                MediaAsset.owner_id == user_id,
+                tuple_(MediaAsset.original_filename, MediaAsset.file_size_bytes).in_(pairs),
+            )
+        )
+    ).all()
+
+    already_uploaded: list[str] = []
+    for name, size in rows:
+        already_uploaded.extend(lookup.get((name, size), []))
+
+    return PreflightResponse(already_uploaded=already_uploaded)

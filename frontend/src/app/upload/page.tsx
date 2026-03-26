@@ -15,6 +15,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import {
   startDirectUpload,
+  checkUploadPreflight,
   getImportJob,
   UploadPreflightError,
   type ImportJobStatus,
@@ -117,6 +118,16 @@ export default function UploadPage() {
     // Skip files already confirmed uploaded in a previous attempt this session.
     const cacheKey = uploadCacheKey(selectedFiles);
     const done = loadDoneSet(cacheKey);
+
+    // Augment with server-side knowledge — survives browser restarts and
+    // cleared localStorage.  Fails open: if the request errors, done stays
+    // as-is and the upload continues normally.
+    const serverDone = await checkUploadPreflight(
+      token,
+      selectedFiles.map((f) => ({ path: f.webkitRelativePath || f.name, size: f.size })),
+    );
+    serverDone.forEach((fp) => done.add(fp));
+
     const pairs = selectedFiles
       .map((f) => ({ file: f, path: f.webkitRelativePath ?? "" }))
       .filter((p) => !done.has(fingerprint(p.file)));

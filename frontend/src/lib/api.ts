@@ -282,6 +282,35 @@ export function startDirectUpload(
   });
 }
 
+/**
+ * Check which files from the given list already exist in the user's library.
+ * Returns a Set of "path|size" fingerprints (same format as the upload page's
+ * fingerprint() function) for files that can be skipped.  Fails open — if the
+ * request errors for any reason the returned Set is empty so the upload
+ * continues normally.
+ */
+export async function checkUploadPreflight(
+  token: string,
+  files: Array<{ path: string; size: number }>,
+): Promise<Set<string>> {
+  if (files.length === 0) return new Set();
+  try {
+    const res = await fetch(`${CLIENT_API_URL}/upload/preflight`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ files }),
+    });
+    if (!res.ok) return new Set();
+    const data = (await res.json()) as { already_uploaded: string[] };
+    return new Set(data.already_uploaded);
+  } catch {
+    return new Set();
+  }
+}
+
 export interface AssetItem {
   id: string;
   original_filename: string;
