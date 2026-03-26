@@ -6,7 +6,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
-import { getAsset, AssetDetail } from "@/lib/api";
+import { getAsset, listAlbums, addAssetsToAlbum, AssetDetail, AlbumItem } from "@/lib/api";
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -39,6 +39,13 @@ export default function AssetDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Albums
+  const [albums, setAlbums] = useState<AlbumItem[]>([]);
+  const [selectedAlbumId, setSelectedAlbumId] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
+  const [addedAlbumIds, setAddedAlbumIds] = useState<Set<string>>(new Set());
+
   useEffect(() => {
     if (ready && !token) router.replace("/login");
   }, [ready, token, router]);
@@ -51,6 +58,30 @@ export default function AssetDetailPage() {
       .catch((e) => setError(e instanceof Error ? e.message : "Failed to load asset"))
       .finally(() => setLoading(false));
   }, [ready, token, id]);
+
+  useEffect(() => {
+    if (!ready || !token) return;
+    listAlbums(token)
+      .then((list) => {
+        setAlbums(list);
+        if (list.length > 0) setSelectedAlbumId(list[0].id);
+      })
+      .catch(() => {/* non-critical — albums section just stays empty */});
+  }, [ready, token]);
+
+  async function handleAddToAlbum() {
+    if (!token || !selectedAlbumId || !asset) return;
+    setAdding(true);
+    setAddError(null);
+    try {
+      await addAssetsToAlbum(token, selectedAlbumId, [asset.id]);
+      setAddedAlbumIds((prev) => new Set([...prev, selectedAlbumId]));
+    } catch (e) {
+      setAddError(e instanceof Error ? e.message : "Failed to add to album");
+    } finally {
+      setAdding(false);
+    }
+  }
 
   if (!ready || !token) return null;
 
@@ -280,6 +311,35 @@ export default function AssetDetailPage() {
                   </div>
                 )}
               </dl>
+            </section>
+          )}
+          {/* Albums */}
+          {albums.length > 0 && (
+            <section>
+              <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">Albums</h2>
+              <div className="flex gap-2">
+                <select
+                  value={selectedAlbumId}
+                  onChange={(e) => setSelectedAlbumId(e.target.value)}
+                  className="flex-1 rounded border border-gray-200 bg-gray-50 px-2 py-1.5 text-sm text-gray-700 focus:border-gray-400 focus:outline-none"
+                >
+                  {albums.map((album) => (
+                    <option key={album.id} value={album.id}>
+                      {album.title}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  onClick={handleAddToAlbum}
+                  disabled={adding || addedAlbumIds.has(selectedAlbumId)}
+                  className="rounded border border-gray-200 px-3 py-1.5 text-sm text-gray-700 hover:border-gray-400 disabled:opacity-40"
+                >
+                  {addedAlbumIds.has(selectedAlbumId) ? "Added" : adding ? "Adding…" : "Add"}
+                </button>
+              </div>
+              {addError && (
+                <p className="mt-1 text-xs text-red-600">{addError}</p>
+              )}
             </section>
           )}
         </aside>

@@ -162,6 +162,14 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-white px-4 py-6">
+      {/* Nav */}
+      <div className="mb-4 flex items-center justify-between">
+        <span className="text-sm font-semibold text-gray-900">Photos</span>
+        <Link href="/albums" className="text-sm text-gray-500 hover:text-gray-900">
+          Albums
+        </Link>
+      </div>
+
       {/* Search bar */}
       <div className="mb-6">
         <input
