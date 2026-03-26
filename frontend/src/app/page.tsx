@@ -6,7 +6,7 @@
  * container so no browser-level scrollbar is shown.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
@@ -321,7 +321,7 @@ export default function Home() {
   }, [ready, token, router]);
 
   // Measure container width for justified layout.
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!gridRef.current) return;
     const obs = new ResizeObserver(([entry]) => {
       setContainerWidth(Math.floor(entry.contentRect.width));
