@@ -1,9 +1,9 @@
-"""SQLAlchemy model for tracking Google Takeout import job progress."""
+"""SQLAlchemy model for tracking import job progress (Takeout and direct upload)."""
 
 import enum
 import uuid
 
-from sqlalchemy import BigInteger, DateTime, Enum, Integer, String, text
+from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -45,6 +45,13 @@ class ImportJob(Base):
     )
     errors: Mapped[list] = mapped_column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    # Direct upload fields (issue #91)
+    upload_keys: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    target_album_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("albums.id", ondelete="SET NULL"),
+        nullable=True,
     )
     created_at: Mapped[DateTime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")

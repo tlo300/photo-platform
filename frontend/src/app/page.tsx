@@ -165,9 +165,14 @@ export default function Home() {
       {/* Nav */}
       <div className="mb-4 flex items-center justify-between">
         <span className="text-sm font-semibold text-gray-900">Photos</span>
-        <Link href="/albums" className="text-sm text-gray-500 hover:text-gray-900">
-          Albums
-        </Link>
+        <div className="flex items-center gap-4">
+          <Link href="/upload" className="text-sm text-gray-500 hover:text-gray-900">
+            Upload
+          </Link>
+          <Link href="/albums" className="text-sm text-gray-500 hover:text-gray-900">
+            Albums
+          </Link>
+        </div>
       </div>
 
       {/* Search bar */}
