@@ -101,6 +101,9 @@ Blocked         : (none)
 - For folder uploads: if `rel_path` has directory components → `_ensure_album_path` creates the hierarchy (rooted at `target_album_id` when set). If flat upload + `target_album_id` → link directly. If neither → no album.
 - `_get_or_create_album` and `_link_asset_to_album` are local copies in `upload_tasks.py` to avoid circular imports with `takeout_tasks.py`.
 - No sidecar support for direct uploads — `captured_at` falls back to EXIF date, then `datetime.now()`.
+- `upload_tasks` must be listed in `celery_app.py` `include=` — it was missing, causing `KeyError: 'upload.process_direct'` at runtime (worker silently discards the task).
+- Browsers ignore `accept="image/*,video/*"` for `webkitdirectory` picks; Google Takeout folders contain `.supplemental-metadata.json` sidecars. Filter client-side in `handleFilesChange` by both MIME type and extension — Windows browsers often report empty `type` for `.json` files so extension check is required.
+- `/upload` progress bar shows upload speed/ETA (bytes); processing phase shows files/s + ETA derived from poll responses.
 
 **Suggested next step:** #30 Production Docker Compose config (milestone 6) or another milestone 5 item.
 
