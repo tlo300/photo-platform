@@ -420,6 +420,7 @@ export interface AlbumItem {
   cover_asset_id: string | null;
   cover_thumbnail_url: string | null;
   asset_count: number;
+  is_hidden: boolean;
   created_at: string;
 }
 
@@ -459,6 +460,26 @@ export async function createAlbum(token: string, title: string): Promise<AlbumIt
   return res.json();
 }
 
+export async function updateAlbumHidden(
+  token: string,
+  albumId: string,
+  isHidden: boolean
+): Promise<AlbumItem> {
+  const res = await fetch(`${CLIENT_API_URL}/albums/${albumId}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ is_hidden: isHidden }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error((data as { detail?: string }).detail ?? "Failed to update album");
+  }
+  return res.json();
+}
+
 export async function getAlbumAssets(
   token: string,
   albumId: string
@@ -490,6 +511,25 @@ export async function addAssetsToAlbum(
     const data = await res.json().catch(() => ({}));
     throw new Error((data as { detail?: string }).detail ?? "Failed to add to album");
   }
+}
+
+export interface AssetAlbumItem {
+  id: string;
+  title: string;
+}
+
+export async function getAssetAlbums(
+  token: string,
+  assetId: string
+): Promise<AssetAlbumItem[]> {
+  const res = await fetch(`${CLIENT_API_URL}/assets/${assetId}/albums`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error((data as { detail?: string }).detail ?? "Failed to load asset albums");
+  }
+  return res.json();
 }
 
 export async function removeAssetFromAlbum(

@@ -84,6 +84,24 @@ In progress     : (none)
 Blocked         : (none)
 ```
 
+### Handoff — 2026-03-26 (#121 Hide albums from photo feed — PR #123)
+**Completed:**
+- Migration 0021: `is_hidden BOOLEAN NOT NULL DEFAULT false` on `albums`
+- `Album` model: `is_hidden` field
+- All album API responses (`AlbumResponse`, `AlbumDetail`) expose `is_hidden`
+- `PATCH /albums/{id}` accepts `is_hidden` to toggle visibility
+- `GET /assets` feed filter: assets only in hidden albums excluded; assets in no album or ≥1 visible album always shown via `NOT EXISTS(any membership) OR EXISTS(visible membership)`
+- `/albums` list page: eye/eye-slash icon button on each card (hover to reveal); hidden albums at 50% opacity with "· hidden from feed" caption
+- `/albums/{id}` detail page: "Visible in feed" / "Hidden from feed" button in header, updates immediately on click
+- `api.ts`: `is_hidden` on `AlbumItem`; new `updateAlbumHidden()` function
+- 6 new regression tests: 3 for album API (default false, PATCH, unhide), 3 for feed filter (hidden-only excluded, mixed visible, no-album always shown)
+
+**Gotchas:**
+- The `or_` import at the top of `assets.py` was being shadowed by a local `from sqlalchemy import or_, and_, null` inside the cursor branch. Fixed by removing `or_` from that local import (it's already at module level).
+- Test infra (`docker-compose.test.yml`) uses the same ports as the dev stack (5433, 9002). Running both simultaneously causes containers to be recreated and the backend to go unhealthy. Always stop the dev stack before running the test suite, or run via CI.
+
+**Suggested next step:** #31 S3-compatible storage abstraction or #32 Deployment runbook.
+
 ### Handoff — 2026-03-26 (#124 Justified photo grid, day grouping, timeline scrubber — PR #126)
 **Completed:**
 - `AssetItem` (backend + TypeScript) gains `width`, `height`, `locality` — no migration needed
@@ -373,6 +391,7 @@ Update the status column as issues progress.
 | #28   | Google Takeout album import              | 5         | pr-open |
 | #29   | Albums UI                                | 5         | pr-open |
 | #91   | Direct file and folder upload            | 5         | pr-open |
+| #121  | Albums: hide from photo feed             | 5         | pr-open |
 | #30   | Production Docker Compose config         | 6         | pr-open |
 | #31   | S3-compatible storage abstraction        | 6         | backlog |
 | #32   | Deployment runbook                       | 6         | backlog |

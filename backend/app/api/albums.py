@@ -44,6 +44,7 @@ class AlbumResponse(BaseModel):
     cover_asset_id: uuid.UUID | None
     cover_thumbnail_url: str | None
     asset_count: int
+    is_hidden: bool
     created_at: datetime
 
 
@@ -77,6 +78,7 @@ class UpdateAlbumRequest(BaseModel):
     title: str | None = None
     description: str | None = None
     cover_asset_id: uuid.UUID | None = None
+    is_hidden: bool | None = None
 
 
 class AddAssetsRequest(BaseModel):
@@ -138,6 +140,7 @@ async def create_album(
         cover_asset_id=album.cover_asset_id,
         cover_thumbnail_url=None,
         asset_count=0,
+        is_hidden=album.is_hidden,
         created_at=album.created_at,
     )
 
@@ -190,6 +193,7 @@ async def list_albums(
                 cover_asset_id=album.cover_asset_id,
                 cover_thumbnail_url=_cover_thumbnail_url(user_id, cover_id),
                 asset_count=counts.get(album.id, 0),
+                is_hidden=album.is_hidden,
                 created_at=album.created_at,
             )
         )
@@ -225,6 +229,7 @@ async def get_album(
         cover_asset_id=album.cover_asset_id,
         cover_thumbnail_url=_cover_thumbnail_url(user_id, cover_id),
         asset_count=len(rows),
+        is_hidden=album.is_hidden,
         created_at=album.created_at,
         asset_ids=list(rows),
     )
@@ -244,6 +249,8 @@ async def update_album(
         album.title = body.title
     if body.description is not None:
         album.description = body.description
+    if body.is_hidden is not None:
+        album.is_hidden = body.is_hidden
     if body.cover_asset_id is not None:
         # Verify the asset exists and belongs to this user.
         asset = await session.scalar(
@@ -273,6 +280,7 @@ async def update_album(
         cover_asset_id=album.cover_asset_id,
         cover_thumbnail_url=_cover_thumbnail_url(user_id, album.cover_asset_id),
         asset_count=count or 0,
+        is_hidden=album.is_hidden,
         created_at=album.created_at,
     )
 

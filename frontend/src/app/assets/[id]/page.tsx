@@ -6,7 +6,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
-import { getAsset, listAlbums, addAssetsToAlbum, AssetDetail, AlbumItem } from "@/lib/api";
+import { getAsset, listAlbums, addAssetsToAlbum, getAssetAlbums, AssetDetail, AlbumItem, AssetAlbumItem } from "@/lib/api";
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -41,6 +41,7 @@ export default function AssetDetailPage() {
 
   // Albums
   const [albums, setAlbums] = useState<AlbumItem[]>([]);
+  const [memberAlbums, setMemberAlbums] = useState<AssetAlbumItem[]>([]);
   const [selectedAlbumId, setSelectedAlbumId] = useState("");
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
@@ -69,6 +70,16 @@ export default function AssetDetailPage() {
       .catch(() => {/* non-critical — albums section just stays empty */});
   }, [ready, token]);
 
+  useEffect(() => {
+    if (!ready || !token || !id) return;
+    getAssetAlbums(token, id)
+      .then((list) => {
+        setMemberAlbums(list);
+        setAddedAlbumIds(new Set(list.map((a) => a.id)));
+      })
+      .catch(() => {/* non-critical */});
+  }, [ready, token, id]);
+
   async function handleAddToAlbum() {
     if (!token || !selectedAlbumId || !asset) return;
     setAdding(true);
@@ -76,6 +87,14 @@ export default function AssetDetailPage() {
     try {
       await addAssetsToAlbum(token, selectedAlbumId, [asset.id]);
       setAddedAlbumIds((prev) => new Set([...prev, selectedAlbumId]));
+      const album = albums.find((a) => a.id === selectedAlbumId);
+      if (album) {
+        setMemberAlbums((prev) =>
+          [...prev, { id: album.id, title: album.title }].sort((a, b) =>
+            a.title.localeCompare(b.title)
+          )
+        );
+      }
     } catch (e) {
       setAddError(e instanceof Error ? e.message : "Failed to add to album");
     } finally {
@@ -314,31 +333,48 @@ export default function AssetDetailPage() {
             </section>
           )}
           {/* Albums */}
-          {albums.length > 0 && (
+          {(albums.length > 0 || memberAlbums.length > 0) && (
             <section>
               <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">Albums</h2>
-              <div className="flex gap-2">
-                <select
-                  value={selectedAlbumId}
-                  onChange={(e) => setSelectedAlbumId(e.target.value)}
-                  className="flex-1 rounded border border-gray-200 bg-gray-50 px-2 py-1.5 text-sm text-gray-700 focus:border-gray-400 focus:outline-none"
-                >
-                  {albums.map((album) => (
-                    <option key={album.id} value={album.id}>
+              {memberAlbums.length > 0 && (
+                <div className="mb-3 flex flex-wrap gap-1.5">
+                  {memberAlbums.map((album) => (
+                    <a
+                      key={album.id}
+                      href={`/albums/${album.id}`}
+                      className="rounded-full bg-gray-100 px-3 py-1 text-xs text-gray-700 hover:bg-gray-200"
+                    >
                       {album.title}
-                    </option>
+                    </a>
                   ))}
-                </select>
-                <button
-                  onClick={handleAddToAlbum}
-                  disabled={adding || addedAlbumIds.has(selectedAlbumId)}
-                  className="rounded border border-gray-200 px-3 py-1.5 text-sm text-gray-700 hover:border-gray-400 disabled:opacity-40"
-                >
-                  {addedAlbumIds.has(selectedAlbumId) ? "Added" : adding ? "Adding…" : "Add"}
-                </button>
-              </div>
-              {addError && (
-                <p className="mt-1 text-xs text-red-600">{addError}</p>
+                </div>
+              )}
+              {albums.length > 0 && (
+                <>
+                  <div className="flex gap-2">
+                    <select
+                      value={selectedAlbumId}
+                      onChange={(e) => setSelectedAlbumId(e.target.value)}
+                      className="flex-1 rounded border border-gray-200 bg-gray-50 px-2 py-1.5 text-sm text-gray-700 focus:border-gray-400 focus:outline-none"
+                    >
+                      {albums.map((album) => (
+                        <option key={album.id} value={album.id}>
+                          {album.title}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      onClick={handleAddToAlbum}
+                      disabled={adding || addedAlbumIds.has(selectedAlbumId)}
+                      className="rounded border border-gray-200 px-3 py-1.5 text-sm text-gray-700 hover:border-gray-400 disabled:opacity-40"
+                    >
+                      {addedAlbumIds.has(selectedAlbumId) ? "Added" : adding ? "Adding…" : "Add"}
+                    </button>
+                  </div>
+                  {addError && (
+                    <p className="mt-1 text-xs text-red-600">{addError}</p>
+                  )}
+                </>
               )}
             </section>
           )}
