@@ -492,6 +492,25 @@ export async function addAssetsToAlbum(
   }
 }
 
+export interface AssetAlbumItem {
+  id: string;
+  title: string;
+}
+
+export async function getAssetAlbums(
+  token: string,
+  assetId: string
+): Promise<AssetAlbumItem[]> {
+  const res = await fetch(`${CLIENT_API_URL}/assets/${assetId}/albums`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error((data as { detail?: string }).detail ?? "Failed to load asset albums");
+  }
+  return res.json();
+}
+
 export async function removeAssetFromAlbum(
   token: string,
   albumId: string,
