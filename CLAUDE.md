@@ -78,11 +78,28 @@ When making a non-obvious technical decision, create docs/decisions/NNN-short-ti
 Update this section at the end of every working session.
 
 ```
-Active milestone : 6 – European server migration readiness
-Last completed  : Bug fix — wrong photo dates from bad EXIF / ms timestamps / supplemental-metadata.json / folder-year fallback (2026-03-26, PR #119)
+Active milestone : Extra Requirements
+Last completed  : #124 — justified photo grid, day grouping, timeline scrubber (2026-03-26, PR #126)
 In progress     : (none)
 Blocked         : (none)
 ```
+
+### Handoff — 2026-03-26 (#124 Justified photo grid, day grouping, timeline scrubber — PR #126)
+**Completed:**
+- `AssetItem` (backend + TypeScript) gains `width`, `height`, `locality` — no migration needed
+- `list_assets`: base select now outjoins `MediaMetadata` (width/height) and `Location` (locality); Location is outjoined on normal timeline, inner-joined when `near=` proximity filter is active (same behaviour as before for geo ordering + locality comes from that join)
+- `search_assets`: same outjoins added; both switched from `session.scalars()` to `session.execute()` to handle multi-column row tuples
+- Frontend `page.tsx`: full rewrite — `h-screen overflow-hidden` root, inner `overflow-y-auto` scroll container (no browser scrollbar), `justifyRow` + `buildRows` justified layout engine (~200 px target row height), `groupByDay` with per-day location summary ("Amsterdam & 1 more"), timeline scrubber (right column, year labels, scroll-tracking active year, click-to-jump)
+- `IntersectionObserver` root set to inner scroll container; scroll restoration via `scrollRef.current.scrollTop`
+- 2 new tests: `width`/`height` null without metadata row; populated with metadata + locality from location.display_name
+
+**Gotchas:**
+- The local `from sqlalchemy import or_, and_, null` inside the cursor branch was shadowing module-level `or_`. Fixed by removing `or_` from that local import.
+- `session.scalars()` only returns the first column of a multi-column select — must use `session.execute()` when joining extra scalar columns.
+- Location outerjoin must come after all other filters (person, date, media_type, has_location) so the `has_location` EXISTS subqueries don't conflict with the join.
+- `ResizeObserver` on `gridRef` measures container width for the justified layout — needed because the scrubber column takes `w-10` off the right edge.
+
+**Suggested next step:** #31 S3-compatible storage abstraction or #32 Deployment runbook.
 
 ### Handoff — 2026-03-26 (Bug fix: wrong photo dates — PR #119)
 **Problem:** Photos with bad camera clocks (e.g. PICT0049.JPG showing 2029 instead of 2003) were not being corrected by the Google Takeout sidecar `photoTakenTime`.
