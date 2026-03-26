@@ -415,3 +415,150 @@ async def test_get_upload_job_other_user_cannot_see(
             headers={"Authorization": f"Bearer {second_user_token}"},
         )
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Tests — _ingest_one duplicate album-linking
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def ingest_session_factory():
+    """Async session factory connected as app_user (RLS enforced)."""
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    APP_USER_ASYNC_URL = os.environ.get(
+        "TEST_DATABASE_APP_ASYNC_URL",
+        "postgresql+psycopg://app_user:testpassword@localhost:5433/photo_test",
+    )
+    engine = create_async_engine(APP_USER_ASYNC_URL)
+    return async_sessionmaker(engine, expire_on_commit=False)
+
+
+@pytest.fixture(scope="module")
+def ingest_owner_id(migrator_engine) -> uuid.UUID:
+    uid = uuid.uuid4()
+    with migrator_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO users (id, email, display_name, password_hash)"
+                " VALUES (:id, :email, :name, 'x')"
+            ),
+            {"id": uid, "email": f"ingest-test-{uid}@example.com", "name": "Ingest Tester"},
+        )
+    return uid
+
+
+def _make_job(owner_id: uuid.UUID):
+    from app.models.import_job import ImportJob, ImportJobStatus
+
+    j = ImportJob()
+    j.id = uuid.uuid4()
+    j.owner_id = owner_id
+    j.status = ImportJobStatus.processing
+    j.total = 1
+    j.processed = 0
+    j.duplicates = 0
+    j.no_sidecar = 0
+    j.errors = []
+    j.upload_keys = []
+    return j
+
+
+@pytest.mark.asyncio
+async def test_duplicate_photo_linked_to_new_album(
+    ingest_session_factory, ingest_owner_id, migrator_engine
+):
+    """A photo that already exists should be linked to the new album on re-upload.
+
+    Regression test: previously the dedup early-return skipped album linking entirely,
+    so the existing photo was NOT added to the new album.
+    """
+    import hashlib
+    from sqlalchemy import select as sa_select
+
+    from app.models.album import AlbumAsset
+    from app.models.media import MediaAsset
+    from app.services.exif import ExifResult
+    from app.worker.upload_tasks import _ingest_one
+
+    # Unique bytes so the checksum doesn't collide with other test runs
+    jpeg = _minimal_jpeg() + uuid.uuid4().bytes
+
+    owner_id = ingest_owner_id
+    session_factory = ingest_session_factory
+
+    # Create two albums directly in the DB (bypass RLS via migrator)
+    album_a_id = uuid.uuid4()
+    album_b_id = uuid.uuid4()
+    with migrator_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO albums (id, owner_id, title) VALUES"
+                " (:a, :owner, 'Dup-Test Album A'), (:b, :owner, 'Dup-Test Album B')"
+            ),
+            {"a": album_a_id, "b": album_b_id, "owner": owner_id},
+        )
+
+    fake_exif = ExifResult()
+
+    # First ingest — creates the asset and links it to album A
+    job1 = _make_job(owner_id)
+    with (
+        patch("app.worker.upload_tasks.storage_service") as mock_storage,
+        patch("app.worker.upload_tasks.extract_exif", return_value=fake_exif),
+        patch("app.worker.upload_tasks.apply_exif"),
+        patch("app.worker.thumbnail_tasks.generate_thumbnails") as mock_thumbs,
+    ):
+        mock_storage.upload.return_value = f"{owner_id}/{uuid.uuid4()}/original.jpg"
+        mock_thumbs.delay.return_value = None
+
+        async with session_factory() as session:
+            async with session.begin():
+                await session.execute(
+                    text(f"SET LOCAL app.current_user_id = '{owner_id}'")
+                )
+                await _ingest_one(
+                    session, job1, owner_id, jpeg, "photo.jpg", "",
+                    target_album_id=album_a_id,
+                )
+
+    assert job1.duplicates == 0
+
+    # Second ingest — same bytes, different target album
+    job2 = _make_job(owner_id)
+    async with session_factory() as session:
+        async with session.begin():
+            await session.execute(
+                text(f"SET LOCAL app.current_user_id = '{owner_id}'")
+            )
+            await _ingest_one(
+                session, job2, owner_id, jpeg, "photo.jpg", "",
+                target_album_id=album_b_id,
+            )
+
+    assert job2.duplicates == 1
+
+    # Verify the asset is now in BOTH albums
+    checksum = hashlib.sha256(jpeg).hexdigest()
+    async with session_factory() as session:
+        async with session.begin():
+            await session.execute(
+                text(f"SET LOCAL app.current_user_id = '{owner_id}'")
+            )
+            asset_id = await session.scalar(
+                sa_select(MediaAsset.id).where(
+                    MediaAsset.owner_id == owner_id,
+                    MediaAsset.checksum == checksum,
+                )
+            )
+            assert asset_id is not None, "asset should exist after first ingest"
+
+            memberships = set(
+                await session.scalars(
+                    sa_select(AlbumAsset.album_id).where(AlbumAsset.asset_id == asset_id)
+                )
+            )
+
+    assert album_a_id in memberships, "photo should still be in original album A"
+    assert album_b_id in memberships, "photo should have been added to new album B"

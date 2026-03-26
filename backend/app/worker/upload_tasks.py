@@ -172,6 +172,16 @@ async def _ingest_one(
     if existing is not None:
         logger.debug("Skipping duplicate %s (checksum %s)", filename, checksum)
         job.duplicates += 1
+        dir_part = str(PurePosixPath(rel_path).parent) if rel_path else ""
+        has_dir = dir_part and dir_part != "."
+        if has_dir:
+            album_id = await _ensure_album_path(
+                session, owner_id, dir_part, root_album_id=target_album_id
+            )
+            if album_id is not None:
+                await _link_asset_to_album(session, album_id, existing)
+        elif target_album_id is not None:
+            await _link_asset_to_album(session, target_album_id, existing)
         return
 
     staged_key: str | None = None
