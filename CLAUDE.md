@@ -91,7 +91,7 @@ Blocked         : (none)
 Assets with `captured_at > '2026-03-26 19:00:00+00'` and `original_filename ~* 'photos\s+from\s+\d{4}'` had `captured_at` set to `make_timestamptz(folder_year, 1, 1, 0, 0, 0, 'UTC')`. 675 assets remain with today's timestamp (custom folder names: "Reis naar Italië", "Wintersport 2026", "Untitled", etc.) — no year extractable from path, left as-is. No migration needed.
 
 **2. "Clear upload cache" button (`frontend/src/app/upload/page.tsx`):**
-Small gray underline button added to the /upload page idle phase. Only shown when any `upload_done_*` localStorage keys exist. Clicking it clears all of them. Already committed, not yet in a PR.
+Small gray underline button added to the /upload page idle phase. Only shown when any `upload_done_*` localStorage keys exist. Clicking it clears all of them.
 
 **3. Photo feed blank on first load (`frontend/src/app/page.tsx`):**
 The justified grid used `useEffect` for the `ResizeObserver` that measures `containerWidth`. Because `useEffect` fires after paint, the API could return and populate items before the observer fired — `buildRows` returned `[]` when `containerWidth=0`, so date headers rendered but no photos were visible. Fixed by changing that single `useEffect` to `useLayoutEffect` (line ~324). `useLayoutEffect` is now included in the React import.
@@ -99,6 +99,22 @@ The justified grid used `useEffect` for the `ResizeObserver` that measures `cont
 **Gotchas:**
 - PostgreSQL ARE regex (`~*`) does NOT support `\b` word-boundary anchors at string positions — use bare `photos\s+from\s+\d{4}` instead of `\bphotos?\s+from\s+(\d{4})\b`. The Python `_folder_year` helper uses the re module which does support `\b`, so the Python code is unaffected.
 - `useLayoutEffect` suppresses the "cannot update during an existing state transition" SSR warning in Next.js — this is fine for a client-only page (`"use client"`).
+
+### Handoff — 2026-03-26 (#121 Hide albums from photo feed — PR #123)
+**Completed:**
+- Migration 0021: `is_hidden BOOLEAN NOT NULL DEFAULT false` on `albums`
+- `Album` model: `is_hidden` field
+- All album API responses (`AlbumResponse`, `AlbumDetail`) expose `is_hidden`
+- `PATCH /albums/{id}` accepts `is_hidden` to toggle visibility
+- `GET /assets` feed filter: assets only in hidden albums excluded; assets in no album or ≥1 visible album always shown via `NOT EXISTS(any membership) OR EXISTS(visible membership)`
+- `/albums` list page: eye/eye-slash icon button on each card (hover to reveal); hidden albums at 50% opacity with "· hidden from feed" caption
+- `/albums/{id}` detail page: "Visible in feed" / "Hidden from feed" button in header, updates immediately on click
+- `api.ts`: `is_hidden` on `AlbumItem`; new `updateAlbumHidden()` function
+- 6 new regression tests: 3 for album API (default false, PATCH, unhide), 3 for feed filter (hidden-only excluded, mixed visible, no-album always shown)
+
+**Gotchas:**
+- The `or_` import at the top of `assets.py` was being shadowed by a local `from sqlalchemy import or_, and_, null` inside the cursor branch. Fixed by removing `or_` from that local import (it's already at module level).
+- Test infra (`docker-compose.test.yml`) uses the same ports as the dev stack (5433, 9002). Running both simultaneously causes containers to be recreated and the backend to go unhealthy. Always stop the dev stack before running the test suite, or run via CI.
 
 **Suggested next step:** #31 S3-compatible storage abstraction or #32 Deployment runbook.
 
@@ -391,6 +407,7 @@ Update the status column as issues progress.
 | #28   | Google Takeout album import              | 5         | pr-open |
 | #29   | Albums UI                                | 5         | pr-open |
 | #91   | Direct file and folder upload            | 5         | pr-open |
+| #121  | Albums: hide from photo feed             | 5         | pr-open |
 | #30   | Production Docker Compose config         | 6         | pr-open |
 | #31   | S3-compatible storage abstraction        | 6         | backlog |
 | #32   | Deployment runbook                       | 6         | backlog |

@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import get_current_user
 from app.db import get_authed_session
+from app.models.album import Album, AlbumAsset
 from app.models.media import Location, MediaAsset, MediaMetadata
 from app.models.tag import AssetTag, Tag
 from app.services.storage import StorageError, storage_service
@@ -232,6 +233,21 @@ async def list_assets(
         stmt = stmt.where(
             ~exists().where(Location.asset_id == MediaAsset.id)
         )
+
+    # Hidden-album filter: exclude assets that belong exclusively to hidden albums.
+    # An asset with no album membership is always shown.
+    # An asset is only excluded if EVERY album it belongs to has is_hidden = true.
+    _hidden_aa = AlbumAsset.__table__.alias("_haa")
+    _hidden_al = Album.__table__.alias("_hal")
+    stmt = stmt.where(
+        or_(
+            ~exists().where(_hidden_aa.c.asset_id == MediaAsset.id),
+            exists()
+            .where(_hidden_aa.c.asset_id == MediaAsset.id)
+            .where(_hidden_aa.c.album_id == _hidden_al.c.id)
+            .where(_hidden_al.c.is_hidden.is_(False)),
+        )
+    )
 
     # Proximity filter — joins locations and filters by ST_DWithin (geography metres).
     # When active, cursor pagination is bypassed and results are ordered by distance.
@@ -515,3 +531,35 @@ async def get_asset(
         ) if loc_row is not None else None,
         tags=[AssetTagItem(name=row.name, source=row.source) for row in tag_rows],
     )
+
+
+class AssetAlbumItem(BaseModel):
+    id: uuid.UUID
+    title: str
+
+
+@router.get("/{asset_id}/albums", response_model=list[AssetAlbumItem])
+async def get_asset_albums(
+    asset_id: uuid.UUID = Path(..., description="Asset UUID"),
+    user_id: uuid.UUID = Depends(get_current_user),
+    session: AsyncSession = Depends(get_authed_session),
+) -> list[AssetAlbumItem]:
+    """Return the albums that contain this asset, ordered by title."""
+    asset = await session.scalar(
+        select(MediaAsset).where(
+            MediaAsset.id == asset_id,
+            MediaAsset.owner_id == user_id,
+        )
+    )
+    if asset is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found.")
+
+    rows = list(
+        await session.execute(
+            select(Album.id, Album.title)
+            .join(AlbumAsset, AlbumAsset.album_id == Album.id)
+            .where(AlbumAsset.asset_id == asset_id, Album.owner_id == user_id)
+            .order_by(Album.title)
+        )
+    )
+    return [AssetAlbumItem(id=row.id, title=row.title) for row in rows]

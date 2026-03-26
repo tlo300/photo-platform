@@ -729,3 +729,83 @@ async def test_width_height_locality_populated(migrator_engine, user_token, test
     # photo_t1 has no location — locality must be null.
     item_t1 = items_by_id[test_data["photo_t1"]]
     assert item_t1["locality"] is None
+
+
+# ---------------------------------------------------------------------------
+# Hidden-album feed filter tests (issue #121)
+# ---------------------------------------------------------------------------
+
+
+def _insert_album(engine, owner_id: str, title: str, *, is_hidden: bool = False) -> str:
+    album_id = str(uuid.uuid4())
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO albums (id, owner_id, title, is_hidden)"
+                " VALUES (:id, :owner_id, :title, :is_hidden)"
+            ),
+            {"id": album_id, "owner_id": owner_id, "title": title, "is_hidden": is_hidden},
+        )
+    return album_id
+
+
+def _add_to_album(engine, album_id: str, asset_id: str) -> None:
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO album_assets (album_id, asset_id, sort_order)"
+                " VALUES (:album_id, :asset_id, 0)"
+            ),
+            {"album_id": album_id, "asset_id": asset_id},
+        )
+
+
+@pytest.mark.asyncio
+async def test_asset_only_in_hidden_album_excluded_from_feed(user_token, migrator_engine):
+    """An asset belonging exclusively to a hidden album must not appear in GET /assets."""
+    user_id = _get_user_id(migrator_engine, "user-tl-")
+    asset_id = _insert_asset(migrator_engine, user_id, "hidden_only.jpg")
+    album_id = _insert_album(migrator_engine, user_id, "Hidden Album", is_hidden=True)
+    _add_to_album(migrator_engine, album_id, asset_id)
+
+    with patch("app.api.assets.storage_service"):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.get(ASSETS_URL, headers={"Authorization": f"Bearer {user_token}"})
+
+    assert resp.status_code == 200
+    ids = {a["id"] for a in resp.json()["items"]}
+    assert asset_id not in ids, "asset in a hidden-only album must not appear in feed"
+
+
+@pytest.mark.asyncio
+async def test_asset_in_hidden_and_visible_album_shown_in_feed(user_token, migrator_engine):
+    """An asset in both a hidden and a visible album must still appear in GET /assets."""
+    user_id = _get_user_id(migrator_engine, "user-tl-")
+    asset_id = _insert_asset(migrator_engine, user_id, "both_albums.jpg")
+    hidden_album = _insert_album(migrator_engine, user_id, "Hidden2", is_hidden=True)
+    visible_album = _insert_album(migrator_engine, user_id, "Visible2", is_hidden=False)
+    _add_to_album(migrator_engine, hidden_album, asset_id)
+    _add_to_album(migrator_engine, visible_album, asset_id)
+
+    with patch("app.api.assets.storage_service"):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.get(ASSETS_URL, headers={"Authorization": f"Bearer {user_token}"})
+
+    assert resp.status_code == 200
+    ids = {a["id"] for a in resp.json()["items"]}
+    assert asset_id in ids, "asset in at least one visible album must appear in feed"
+
+
+@pytest.mark.asyncio
+async def test_asset_not_in_any_album_always_shown(user_token, migrator_engine):
+    """An asset with no album membership is always visible in GET /assets."""
+    user_id = _get_user_id(migrator_engine, "user-tl-")
+    asset_id = _insert_asset(migrator_engine, user_id, "no_album.jpg")
+
+    with patch("app.api.assets.storage_service"):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.get(ASSETS_URL, headers={"Authorization": f"Bearer {user_token}"})
+
+    assert resp.status_code == 200
+    ids = {a["id"] for a in resp.json()["items"]}
+    assert asset_id in ids, "asset not in any album must always appear in feed"
