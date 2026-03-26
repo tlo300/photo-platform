@@ -495,12 +495,23 @@ async def _ingest_one(
             # Sidecar lookup — try standard ".json" name, truncated variant, and the
             # ".supplemental-metadata.json" variant used by some Takeout exports.
             sidecar_data: dict | None = None
-            for candidate in (
+            _p = PurePosixPath(media_name)
+            _stem = _p.stem
+            _dir = str(_p.parent)
+            _dir_prefix = "" if _dir == "." else _dir + "/"
+            _sidecar_candidates: list[str] = [
                 _sidecar_name(media_name),
                 _sidecar_name(Path(media_name).name),
                 media_name + _SUPPLEMENTAL_SIDECAR_EXT,
                 Path(media_name).name + _SUPPLEMENTAL_SIDECAR_EXT,
-            ):
+            ]
+            # Live photo companion: iPhone MP4/MOV shares its stem with the HEIC/HEIF still.
+            # Try swapping the extension to find the photo's sidecar (e.g. IMG_4833.HEIC.json).
+            for _photo_ext in (".heic", ".heif", ".jpg", ".jpeg"):
+                _companion = _dir_prefix + _stem + _photo_ext
+                _sidecar_candidates.append(_companion + _SUPPLEMENTAL_SIDECAR_EXT)
+                _sidecar_candidates.append(_companion + _SIDECAR_EXT)
+            for candidate in _sidecar_candidates:
                 if candidate.lower() in sidecar_set:
                     try:
                         raw_bytes = zf.read(candidate) if candidate in zf.namelist() else None
@@ -792,12 +803,19 @@ async def _ingest_one_from_path(
             # Sidecar: look for {filename}.json (or .supplemental-metadata.json) adjacent
             # to the media file. Try standard and supplemental-metadata naming variants.
             sidecar_data: dict | None = None
-            for candidate_name in (
+            _fname_stem = PurePosixPath(file_path.name).stem
+            _sidecar_candidates_path: list[str] = [
                 _sidecar_name(file_path.name),
                 _sidecar_name(PurePosixPath(file_path.name).name),
                 file_path.name + _SUPPLEMENTAL_SIDECAR_EXT,
                 PurePosixPath(file_path.name).name + _SUPPLEMENTAL_SIDECAR_EXT,
-            ):
+            ]
+            # Live photo companion: iPhone MP4/MOV shares its stem with the HEIC/HEIF still.
+            for _photo_ext in (".heic", ".heif", ".jpg", ".jpeg"):
+                _companion_name = _fname_stem + _photo_ext
+                _sidecar_candidates_path.append(_companion_name + _SUPPLEMENTAL_SIDECAR_EXT)
+                _sidecar_candidates_path.append(_companion_name + _SIDECAR_EXT)
+            for candidate_name in _sidecar_candidates_path:
                 candidate_path = file_path.parent / candidate_name
                 if candidate_path.exists():
                     try:

@@ -459,3 +459,44 @@ async def backfill_metadata(
         backfill_user_metadata.delay(str(uid))
 
     return BackfillMetadataResponse(enqueued=len(user_ids))
+
+
+# ---------------------------------------------------------------------------
+# POST /admin/backfill-live-photo-dates
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/backfill-live-photo-dates",
+    response_model=BackfillMetadataResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def backfill_live_photo_dates(
+    user_id: uuid.UUID | None = Query(
+        default=None,
+        description="Limit backfill to a specific user. Omit to run for all users.",
+    ),
+    admin_id: uuid.UUID = Depends(get_admin_user),
+    session: AsyncSession = Depends(get_session),
+) -> BackfillMetadataResponse:
+    """Fix captured_at on live photo MP4/MOV assets imported without a sidecar.
+
+    For each video asset with sidecar_missing=True, finds the matching HEIC/HEIF
+    photo by stem name and copies its captured_at.  Idempotent — safe to re-run.
+    Returns the number of per-user tasks enqueued.
+    """
+    from app.worker.metadata_tasks import backfill_live_photo_dates as _task
+
+    if user_id is not None:
+        user = await session.scalar(select(User).where(User.id == user_id))
+        if user is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
+        user_ids = [user_id]
+    else:
+        rows = await session.scalars(select(User.id))
+        user_ids = list(rows)
+
+    for uid in user_ids:
+        _task.delay(str(uid))
+
+    return BackfillMetadataResponse(enqueued=len(user_ids))
