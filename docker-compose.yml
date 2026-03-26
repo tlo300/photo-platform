@@ -75,8 +75,6 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     env_file: .env
-    volumes:
-      - ./backend:/app
     networks:
       - photo-net
     depends_on:
@@ -100,8 +98,6 @@ services:
     restart: unless-stopped
     command: celery -A app.worker.celery_app worker --loglevel=info --concurrency=2
     env_file: .env
-    volumes:
-      - ./backend:/app
     networks:
       - photo-net
     depends_on:
@@ -121,10 +117,6 @@ services:
     environment:
       API_URL: http://backend:8000
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-      - /app/.next
     networks:
       - photo-net
     depends_on:
@@ -143,8 +135,6 @@ services:
     ports:
       - "80:80"
       - "443:443"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
     networks:
       - photo-net
     depends_on:
