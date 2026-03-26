@@ -23,6 +23,10 @@ import {
 
 const BATCH_SIZE = 200; // max files per POST request
 
+// Google Takeout sidecar JSONs — always sent to the backend even on re-upload
+// so the worker can fix captured_at on existing assets.
+const SIDECAR_JSON = /\.(jpg|jpeg|heic|heif|png|webp|gif|mp4|mov|avi|mkv)\.json$/i;
+
 // Fingerprint a file by its relative path + size — good enough to skip re-uploads on retry.
 function fingerprint(file: File): string {
   return `${file.webkitRelativePath || file.name}|${file.size}`;
@@ -96,12 +100,17 @@ export default function UploadPage() {
     // picks, so JSON sidecars and other non-media files arrive here unfiltered.
     // On Windows, .json files often report empty type, so we also exclude by
     // extension. Keep other empty-type files (HEIC/HEIF browser behaviour).
+    //
+    // Exception: in folder mode, allow Google Takeout sidecar JSONs through
+    // (e.g. PICT0049.JPG.json) so the backend can use them to correct dates.
     const NON_MEDIA_EXT = /\.(json|xml|html|txt|csv|pdf|zip|db|ini|cfg)$/i;
-    const media = all.filter(
-      (f) =>
+    const media = all.filter((f) => {
+      if (mode === "folder" && SIDECAR_JSON.test(f.name)) return true;
+      return (
         !NON_MEDIA_EXT.test(f.name) &&
         (f.type === "" || f.type.startsWith("image/") || f.type.startsWith("video/"))
-    );
+      );
+    });
     setSelectedFiles(media);
   }
 
@@ -130,7 +139,12 @@ export default function UploadPage() {
 
     const pairs = selectedFiles
       .map((f) => ({ file: f, path: f.webkitRelativePath ?? "" }))
-      .filter((p) => !done.has(fingerprint(p.file)));
+      .filter((p) => {
+        // Sidecar JSONs carry date metadata for existing assets — always send them
+        // even on re-upload so the worker can fix captured_at on duplicates.
+        if (SIDECAR_JSON.test(p.file.name)) return true;
+        return !done.has(fingerprint(p.file));
+      });
 
     const skipped = selectedFiles.length - pairs.length;
     setSkippedCount(skipped);
@@ -195,7 +209,10 @@ export default function UploadPage() {
       jobIds.push(jobId);
 
       // Persist fingerprints so a retry can skip this batch.
-      batch.files.forEach((f) => done.add(fingerprint(f)));
+      // Sidecars are intentionally excluded — they're never skipped on re-upload.
+      batch.files.forEach((f) => {
+        if (!SIDECAR_JSON.test(f.name)) done.add(fingerprint(f));
+      });
       saveDoneSet(cacheKey, done);
 
       bytesBeforeBatch += batch.files.reduce((sum, f) => sum + f.size, 0);

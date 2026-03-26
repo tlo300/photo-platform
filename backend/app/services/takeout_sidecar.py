@@ -189,12 +189,23 @@ async def apply_sidecar(
 # Helpers
 # ---------------------------------------------------------------------------
 
+# Some Google Takeout exports store timestamps in milliseconds rather than seconds.
+# Any value above this threshold (≈ year 2286 in seconds) is treated as milliseconds.
+_MS_THRESHOLD = 10_000_000_000
+
+
 def _parse_timestamp(raw: dict, key: str) -> datetime | None:
-    """Extract a UTC datetime from raw[key]['timestamp'] (Unix epoch string)."""
+    """Extract a UTC datetime from raw[key]['timestamp'] (Unix epoch string).
+
+    Google Takeout occasionally exports timestamps in milliseconds instead of
+    seconds.  Values above _MS_THRESHOLD are automatically divided by 1000.
+    """
     try:
         ts = int(raw[key]["timestamp"])
+        if ts > _MS_THRESHOLD:
+            ts //= 1000
         return datetime.fromtimestamp(ts, tz=timezone.utc)
-    except (KeyError, TypeError, ValueError, OSError):
+    except (KeyError, TypeError, ValueError, OSError, OverflowError):
         return None
 
 

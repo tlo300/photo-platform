@@ -148,6 +148,14 @@ class TestMissingTimestamp:
         result = parse_sidecar(raw)
         assert result.captured_at is None
 
+    def test_millisecond_timestamp_parsed_correctly(self):
+        # Some Takeout exports store timestamps in milliseconds (e.g. old 2003 photos).
+        # 1067040000000 ms == 1067040000 s == 2003-10-25T00:00:00Z
+        raw = {**FULL_SIDECAR, "photoTakenTime": {"timestamp": "1067040000000"}}
+        result = parse_sidecar(raw)
+        expected = datetime.fromtimestamp(1067040000, tz=timezone.utc)
+        assert result.captured_at == expected
+
 
 # ---------------------------------------------------------------------------
 # Robustness

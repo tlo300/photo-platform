@@ -24,6 +24,7 @@ import asyncio
 import contextlib
 import hashlib
 import io
+import json
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -31,7 +32,7 @@ from pathlib import PurePosixPath
 
 import filetype as _filetype
 from botocore.exceptions import ClientError
-from sqlalchemy import select, text
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.config import settings
@@ -39,7 +40,9 @@ from app.models.album import Album, AlbumAsset
 from app.models.import_job import ImportJob, ImportJobStatus
 from app.models.media import MediaAsset
 from app.services.exif import apply_exif, extract_exif
+from app.services.metadata_merge import merge_metadata
 from app.services.storage import StorageError, storage_service
+from app.services.takeout_sidecar import ParsedSidecar, parse_sidecar
 from app.services.upload_validation import ALLOWED_MIME_TYPES
 from app.worker.celery_app import celery_app
 
@@ -173,6 +176,7 @@ async def _ingest_one(
     filename: str,
     rel_path: str,
     target_album_id: uuid.UUID | None,
+    parsed_sidecar: ParsedSidecar | None = None,
 ) -> None:
     """Ingest a single media file from raw bytes.  Errors are caught and appended to job.errors."""
     checksum = _sha256(data)
@@ -185,6 +189,14 @@ async def _ingest_one(
         )
     )
     if existing is not None:
+        # If a sidecar provides a valid date, update the existing asset's captured_at.
+        # This fixes photos previously imported without sidecar data (wrong EXIF clock).
+        if parsed_sidecar is not None:
+            canonical = merge_metadata(None, parsed_sidecar)
+            if canonical.captured_at is not None:
+                existing_asset = await session.get(MediaAsset, existing)
+                if existing_asset is not None:
+                    existing_asset.captured_at = canonical.captured_at
         logger.debug("Skipping duplicate %s (checksum %s)", filename, checksum)
         job.duplicates += 1
         dir_part = str(PurePosixPath(rel_path).parent) if rel_path else ""
@@ -237,10 +249,13 @@ async def _ingest_one(
             )
             await session.flush()
 
-            # EXIF — no sidecar for direct uploads; fall back to now() if no EXIF date
+            # Resolve captured_at via the canonical merge strategy (same as Takeout path).
+            # parsed_sidecar is populated when a matching .json sidecar was uploaded
+            # alongside this file (e.g. a Google Takeout folder structure).
             exif_result = extract_exif(data, mime)
-            if exif_result.captured_at is not None:
-                asset.captured_at = exif_result.captured_at
+            canonical = merge_metadata(exif_result, parsed_sidecar)
+            if canonical.captured_at is not None:
+                asset.captured_at = canonical.captured_at
             else:
                 asset.captured_at = datetime.now(timezone.utc)
                 asset.sidecar_missing = True
@@ -299,20 +314,47 @@ async def _run_direct_upload(job_id: uuid.UUID, owner_id: uuid.UUID) -> None:
                 logger.error("ImportJob %s not found — aborting", job_id)
                 return
 
-            upload_keys: list[dict] = list(job.upload_keys or [])
+            all_keys: list[dict] = list(job.upload_keys or [])
             target_album_id: uuid.UUID | None = job.target_album_id
 
-            job.total = len(upload_keys)
+            # Separate sidecar JSON entries from media entries.
+            # Sidecars are named "<media_filename>.json" (Google Takeout convention).
+            sidecar_entries = [e for e in all_keys if e.get("filename", "").lower().endswith(".json")]
+            media_entries = [e for e in all_keys if not e.get("filename", "").lower().endswith(".json")]
+
+            # Download and parse sidecars, build lookup: media_filename → ParsedSidecar.
+            sidecar_lookup: dict[str, ParsedSidecar] = {}
+            for entry in sidecar_entries:
+                key: str = entry["key"]
+                filename: str = entry.get("filename", "")
+                media_filename = filename[:-5] if filename.lower().endswith(".json") else filename
+                try:
+                    buf = io.BytesIO()
+                    storage_service._client.download_fileobj(
+                        storage_service._bucket, key, buf
+                    )
+                    raw_json = json.loads(buf.getvalue().decode("utf-8", errors="replace"))
+                    # Lowercase key for case-insensitive matching (PICT0049.JPG → pict0049.jpg)
+                    sidecar_lookup[media_filename.lower()] = parse_sidecar(raw_json)
+                except Exception as exc:
+                    logger.warning("Could not process sidecar %s: %s", filename, exc)
+                finally:
+                    with contextlib.suppress(StorageError):
+                        storage_service.delete(key)
+
+            job.total = len(media_entries)
             job.status = ImportJobStatus.processing
             await session.commit()
             await session.execute(
                 text(f"SET LOCAL app.current_user_id = '{owner_id}'")
             )
 
-            for entry in upload_keys:
-                key: str = entry["key"]
-                filename: str = entry.get("filename", "upload")
+            for entry in media_entries:
+                key = entry["key"]
+                filename = entry.get("filename", "upload")
                 rel_path: str = entry.get("rel_path", "")
+
+                parsed_sidecar = sidecar_lookup.get(filename.lower())
 
                 # Download staged file from S3
                 try:
@@ -334,7 +376,8 @@ async def _run_direct_upload(job_id: uuid.UUID, owner_id: uuid.UUID) -> None:
                     continue
 
                 await _ingest_one(
-                    session, job, owner_id, data, filename, rel_path, target_album_id
+                    session, job, owner_id, data, filename, rel_path, target_album_id,
+                    parsed_sidecar=parsed_sidecar,
                 )
                 job.processed += 1
                 await session.commit()
@@ -345,6 +388,39 @@ async def _run_direct_upload(job_id: uuid.UUID, owner_id: uuid.UUID) -> None:
                 # Delete staging key regardless of ingest outcome
                 with contextlib.suppress(StorageError):
                     storage_service.delete(key)
+
+            # Retroactive date fix: for sidecars whose photo was not re-uploaded
+            # (dedup-filtered on the client), update captured_at of existing assets.
+            if sidecar_lookup:
+                processed_lower = {e.get("filename", "").lower() for e in media_entries}
+                for media_filename_lower, sidecar in sidecar_lookup.items():
+                    if media_filename_lower in processed_lower:
+                        continue  # already handled in _ingest_one
+                    if not sidecar.captured_at:
+                        continue
+                    canonical = merge_metadata(None, sidecar)
+                    if not canonical.captured_at:
+                        continue
+                    # Match by full path OR by basename — the browser sends only the
+                    # basename via file.name, but original_filename may be stored with
+                    # a folder prefix (e.g. "Folder/PICT0049.JPG").
+                    basename_lower = PurePosixPath(media_filename_lower).name
+                    result = await session.execute(
+                        select(MediaAsset).where(
+                            MediaAsset.owner_id == owner_id,
+                            or_(
+                                func.lower(MediaAsset.original_filename) == media_filename_lower,
+                                func.lower(MediaAsset.original_filename) == basename_lower,
+                                func.lower(MediaAsset.original_filename).like(f"%/{basename_lower}"),
+                            ),
+                        ).limit(1)
+                    )
+                    existing_asset = result.scalar_one_or_none()
+                    if existing_asset is not None:
+                        existing_asset.captured_at = canonical.captured_at
+                        logger.info("Updated captured_at for %s from sidecar", media_filename_lower)
+                await session.commit()
+                await session.execute(text(f"SET LOCAL app.current_user_id = '{owner_id}'"))
 
             job.status = ImportJobStatus.done
             await session.commit()
