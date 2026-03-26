@@ -1,0 +1,84 @@
+# Production overrides.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Prerequisites:
+#   - .env file with all variables from .env.example filled in
+#   - DOMAIN set to the public hostname (e.g. photos.example.com)
+#   - Valid DNS A record pointing DOMAIN to this server's IP
+#
+# Caddy handles TLS automatically via Let's Encrypt once DNS is live.
+# PgBouncer pools connections between the application and Postgres.
+
+volumes:
+  caddy_data:    # Let's Encrypt certificates and Caddy state
+  caddy_config:  # Caddy runtime config
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # PgBouncer — connection pooler between FastAPI/Celery and Postgres
+  # ---------------------------------------------------------------------------
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    restart: unless-stopped
+    environment:
+      DB_USER: ${DATABASE_APP_USER}
+      DB_PASSWORD: ${DATABASE_APP_PASSWORD}
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: ${POSTGRES_DB}
+      # Session mode: each client connection holds one server connection for its
+      # lifetime.  Safe for SET LOCAL (used by RLS) and asyncpg prepared statements.
+      POOL_MODE: session
+      MAX_CLIENT_CONN: "200"
+      DEFAULT_POOL_SIZE: "20"
+      # Require applications to reset session state on connection release.
+      SERVER_RESET_QUERY: DISCARD ALL
+    networks:
+      - photo-net
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ---------------------------------------------------------------------------
+  # Backend — route DATABASE_URL through PgBouncer in production
+  # ---------------------------------------------------------------------------
+  backend:
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://${DATABASE_APP_USER}:${DATABASE_APP_PASSWORD}@pgbouncer:5432/${POSTGRES_DB}"
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+
+  # ---------------------------------------------------------------------------
+  # Worker — same DATABASE_URL override as backend
+  # ---------------------------------------------------------------------------
+  worker:
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://${DATABASE_APP_USER}:${DATABASE_APP_PASSWORD}@pgbouncer:5432/${POSTGRES_DB}"
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+
+  # ---------------------------------------------------------------------------
+  # MinIO — disable the web console in production
+  # ---------------------------------------------------------------------------
+  minio:
+    command: server /data
+
+  # ---------------------------------------------------------------------------
+  # Caddy — use production Caddyfile (auto-TLS via Let's Encrypt)
+  # ---------------------------------------------------------------------------
+  caddy:
+    volumes:
+      - ./Caddyfile.prod:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
