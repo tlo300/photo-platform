@@ -420,6 +420,7 @@ export interface AlbumItem {
   cover_asset_id: string | null;
   cover_thumbnail_url: string | null;
   asset_count: number;
+  is_hidden: boolean;
   created_at: string;
 }
 
@@ -455,6 +456,26 @@ export async function createAlbum(token: string, title: string): Promise<AlbumIt
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
     throw new Error((data as { detail?: string }).detail ?? "Failed to create album");
+  }
+  return res.json();
+}
+
+export async function updateAlbumHidden(
+  token: string,
+  albumId: string,
+  isHidden: boolean
+): Promise<AlbumItem> {
+  const res = await fetch(`${CLIENT_API_URL}/albums/${albumId}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ is_hidden: isHidden }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error((data as { detail?: string }).detail ?? "Failed to update album");
   }
   return res.json();
 }

@@ -491,3 +491,67 @@ async def test_unauthenticated_returns_401():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post("/albums", json={"title": "No Auth"})
     assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# is_hidden tests (issue #121)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_album_is_hidden_default_false(user_token):
+    """Newly created album has is_hidden=false."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post(
+            "/albums",
+            json={"title": "Visible Album"},
+            headers={"Authorization": f"Bearer {user_token}"},
+        )
+    assert resp.status_code == 201
+    assert resp.json()["is_hidden"] is False
+
+
+@pytest.mark.asyncio
+async def test_patch_album_is_hidden(user_token):
+    """PATCH /albums/{id} with is_hidden=true persists and is reflected in list and detail."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post(
+            "/albums",
+            json={"title": "To Hide"},
+            headers={"Authorization": f"Bearer {user_token}"},
+        )
+        album_id = resp.json()["id"]
+
+        resp = await client.patch(
+            f"/albums/{album_id}",
+            json={"is_hidden": True},
+            headers={"Authorization": f"Bearer {user_token}"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["is_hidden"] is True
+
+        # Detail endpoint also reflects the flag.
+        resp = await client.get(f"/albums/{album_id}", headers={"Authorization": f"Bearer {user_token}"})
+        assert resp.json()["is_hidden"] is True
+
+        # List endpoint too.
+        resp = await client.get("/albums", headers={"Authorization": f"Bearer {user_token}"})
+        found = next((a for a in resp.json() if a["id"] == album_id), None)
+        assert found is not None
+        assert found["is_hidden"] is True
+
+
+@pytest.mark.asyncio
+async def test_patch_album_unhide(user_token):
+    """PATCH /albums/{id} can toggle is_hidden back to false."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post(
+            "/albums",
+            json={"title": "Hide Then Show"},
+            headers={"Authorization": f"Bearer {user_token}"},
+        )
+        album_id = resp.json()["id"]
+        await client.patch(f"/albums/{album_id}", json={"is_hidden": True}, headers={"Authorization": f"Bearer {user_token}"})
+        resp = await client.patch(f"/albums/{album_id}", json={"is_hidden": False}, headers={"Authorization": f"Bearer {user_token}"})
+        assert resp.status_code == 200
+        assert resp.json()["is_hidden"] is False

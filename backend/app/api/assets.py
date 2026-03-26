@@ -234,6 +234,21 @@ async def list_assets(
             ~exists().where(Location.asset_id == MediaAsset.id)
         )
 
+    # Hidden-album filter: exclude assets that belong exclusively to hidden albums.
+    # An asset with no album membership is always shown.
+    # An asset is only excluded if EVERY album it belongs to has is_hidden = true.
+    _hidden_aa = AlbumAsset.__table__.alias("_haa")
+    _hidden_al = Album.__table__.alias("_hal")
+    stmt = stmt.where(
+        or_(
+            ~exists().where(_hidden_aa.c.asset_id == MediaAsset.id),
+            exists()
+            .where(_hidden_aa.c.asset_id == MediaAsset.id)
+            .where(_hidden_aa.c.album_id == _hidden_al.c.id)
+            .where(_hidden_al.c.is_hidden.is_(False)),
+        )
+    )
+
     # Proximity filter — joins locations and filters by ST_DWithin (geography metres).
     # When active, cursor pagination is bypassed and results are ordered by distance.
     # When active, Location is inner-joined (assets without GPS are excluded naturally).
