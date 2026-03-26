@@ -789,9 +789,15 @@ async def _ingest_one_from_path(
 
             exif_result = extract_exif(data, mime)
 
-            # Sidecar: look for {filename}.json adjacent to the media file
+            # Sidecar: look for {filename}.json (or .supplemental-metadata.json) adjacent
+            # to the media file. Try standard and supplemental-metadata naming variants.
             sidecar_data: dict | None = None
-            for candidate_name in (_sidecar_name(file_path.name), _sidecar_name(PurePosixPath(file_path.name).name)):
+            for candidate_name in (
+                _sidecar_name(file_path.name),
+                _sidecar_name(PurePosixPath(file_path.name).name),
+                file_path.name + _SUPPLEMENTAL_SIDECAR_EXT,
+                PurePosixPath(file_path.name).name + _SUPPLEMENTAL_SIDECAR_EXT,
+            ):
                 candidate_path = file_path.parent / candidate_name
                 if candidate_path.exists():
                     try:
@@ -809,7 +815,17 @@ async def _ingest_one_from_path(
 
             canonical = merge_metadata(exif_result, parsed_sidecar)
             if canonical.captured_at is not None:
-                asset.captured_at = canonical.captured_at
+                captured = canonical.captured_at
+                # No sidecar: try to correct a wrong camera-clock year using the
+                # "Photos from YYYY" folder name (Google Takeout convention).
+                if not sidecar_found:
+                    year = _folder_year(str(file_path))
+                    if year and year != captured.year:
+                        try:
+                            captured = captured.replace(year=year)
+                        except ValueError:
+                            pass  # e.g. Feb 29 in a non-leap year — keep original
+                asset.captured_at = captured
             elif not sidecar_found:
                 asset.captured_at = _mtime_from_path(file_path)
                 logger.warning(
