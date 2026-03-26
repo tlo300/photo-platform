@@ -148,6 +148,30 @@ async def start_direct_upload(
         # request.form() leaves the file pointer at EOF after parsing; reset first.
         await upload.seek(0)
 
+        # Google Takeout sidecar JSON files bypass MIME detection — they carry date
+        # metadata for accompanying photos and are processed by the worker separately.
+        if filename.lower().endswith(".json"):
+            upload.file.seek(0, 2)
+            file_size = upload.file.tell()
+            upload.file.seek(0)
+            if file_size > settings.max_upload_size_bytes:
+                pre_errors.append({"filename": filename, "reason": "Exceeds maximum allowed size."})
+                continue
+            key = _STAGING_KEY_TMPL.format(
+                user_id=user_id, job_id=job_id, index=index, suffix=".json"
+            )
+            try:
+                storage_service._client.upload_fileobj(
+                    upload.file,
+                    storage_service._bucket,
+                    key,
+                    ExtraArgs={"ContentType": "application/json"},
+                )
+                staged.append({"key": key, "filename": filename, "rel_path": rel_path})
+            except ClientError as exc:
+                pre_errors.append({"filename": filename, "reason": f"Failed to stage: {exc}"})
+            continue
+
         # Read only the first 512 bytes for MIME detection — avoids loading the
         # entire file into RAM (large videos can be several GB).
         header = await upload.read(512)
