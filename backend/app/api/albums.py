@@ -16,7 +16,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Path, status
 from pydantic import BaseModel
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import get_current_user
@@ -43,11 +43,23 @@ class AlbumResponse(BaseModel):
     parent_id: uuid.UUID | None
     cover_asset_id: uuid.UUID | None
     cover_thumbnail_url: str | None
+    asset_count: int
     created_at: datetime
 
 
 class AlbumDetail(AlbumResponse):
     asset_ids: list[uuid.UUID]
+
+
+class AlbumAssetItem(BaseModel):
+    """Lightweight asset representation used in album asset lists."""
+
+    id: uuid.UUID
+    original_filename: str
+    mime_type: str
+    captured_at: datetime | None
+    thumbnail_ready: bool
+    thumbnail_url: str | None
 
 
 # ---------------------------------------------------------------------------
@@ -125,6 +137,7 @@ async def create_album(
         parent_id=album.parent_id,
         cover_asset_id=album.cover_asset_id,
         cover_thumbnail_url=None,
+        asset_count=0,
         created_at=album.created_at,
     )
 
@@ -144,6 +157,16 @@ async def list_albums(
             select(Album).where(Album.owner_id == user_id).order_by(Album.title)
         )
     )
+
+    # Fetch asset counts for all albums in one query.
+    count_rows = list(
+        await session.execute(
+            select(AlbumAsset.album_id, func.count(AlbumAsset.asset_id).label("cnt"))
+            .where(AlbumAsset.album_id.in_([a.id for a in albums]))
+            .group_by(AlbumAsset.album_id)
+        )
+    )
+    counts: dict[uuid.UUID, int] = {row.album_id: row.cnt for row in count_rows}
 
     result = []
     for album in albums:
@@ -166,6 +189,7 @@ async def list_albums(
                 parent_id=album.parent_id,
                 cover_asset_id=album.cover_asset_id,
                 cover_thumbnail_url=_cover_thumbnail_url(user_id, cover_id),
+                asset_count=counts.get(album.id, 0),
                 created_at=album.created_at,
             )
         )
@@ -200,6 +224,7 @@ async def get_album(
         parent_id=album.parent_id,
         cover_asset_id=album.cover_asset_id,
         cover_thumbnail_url=_cover_thumbnail_url(user_id, cover_id),
+        asset_count=len(rows),
         created_at=album.created_at,
         asset_ids=list(rows),
     )
@@ -237,6 +262,9 @@ async def update_album(
     await session.flush()
     await session.refresh(album)
     await session.commit()
+    count = await session.scalar(
+        select(func.count(AlbumAsset.asset_id)).where(AlbumAsset.album_id == album.id)
+    )
     return AlbumResponse(
         id=album.id,
         title=album.title,
@@ -244,6 +272,7 @@ async def update_album(
         parent_id=album.parent_id,
         cover_asset_id=album.cover_asset_id,
         cover_thumbnail_url=_cover_thumbnail_url(user_id, album.cover_asset_id),
+        asset_count=count or 0,
         created_at=album.created_at,
     )
 
@@ -372,3 +401,43 @@ async def reorder_assets(
         )
 
     await session.commit()
+
+
+@router.get("/{album_id}/assets", response_model=list[AlbumAssetItem])
+async def list_album_assets(
+    album_id: uuid.UUID = Path(...),
+    user_id: uuid.UUID = Depends(get_current_user),
+    session: AsyncSession = Depends(get_authed_session),
+) -> list[AlbumAssetItem]:
+    """Return assets in an album ordered by sort_order, with thumbnail URLs."""
+    await _get_album_or_404(album_id, user_id, session)
+
+    rows = list(
+        await session.execute(
+            select(MediaAsset, AlbumAsset.sort_order)
+            .join(AlbumAsset, AlbumAsset.asset_id == MediaAsset.id)
+            .where(AlbumAsset.album_id == album_id)
+            .order_by(AlbumAsset.sort_order, AlbumAsset.asset_id)
+        )
+    )
+
+    result = []
+    for asset, _sort_order in rows:
+        thumb_url: str | None = None
+        if asset.thumbnail_ready:
+            key = _THUMBNAIL_KEY_TEMPLATE.format(user_id=user_id, asset_id=asset.id)
+            try:
+                thumb_url = storage_service.generate_presigned_url(str(user_id), key)
+            except StorageError:
+                thumb_url = None
+        result.append(
+            AlbumAssetItem(
+                id=asset.id,
+                original_filename=asset.original_filename,
+                mime_type=asset.mime_type,
+                captured_at=asset.captured_at,
+                thumbnail_ready=asset.thumbnail_ready,
+                thumbnail_url=thumb_url,
+            )
+        )
+    return result

@@ -302,6 +302,101 @@ export async function getAsset(token: string, id: string): Promise<AssetDetail> 
   return res.json();
 }
 
+export interface AlbumItem {
+  id: string;
+  title: string;
+  description: string | null;
+  parent_id: string | null;
+  cover_asset_id: string | null;
+  cover_thumbnail_url: string | null;
+  asset_count: number;
+  created_at: string;
+}
+
+export interface AlbumAssetItem {
+  id: string;
+  original_filename: string;
+  mime_type: string;
+  captured_at: string | null;
+  thumbnail_ready: boolean;
+  thumbnail_url: string | null;
+}
+
+export async function listAlbums(token: string): Promise<AlbumItem[]> {
+  const res = await fetch(`${CLIENT_API_URL}/albums`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error((data as { detail?: string }).detail ?? "Failed to load albums");
+  }
+  return res.json();
+}
+
+export async function createAlbum(token: string, title: string): Promise<AlbumItem> {
+  const res = await fetch(`${CLIENT_API_URL}/albums`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ title }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error((data as { detail?: string }).detail ?? "Failed to create album");
+  }
+  return res.json();
+}
+
+export async function getAlbumAssets(
+  token: string,
+  albumId: string
+): Promise<AlbumAssetItem[]> {
+  const res = await fetch(`${CLIENT_API_URL}/albums/${albumId}/assets`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error((data as { detail?: string }).detail ?? "Failed to load album assets");
+  }
+  return res.json();
+}
+
+export async function addAssetsToAlbum(
+  token: string,
+  albumId: string,
+  assetIds: string[]
+): Promise<void> {
+  const res = await fetch(`${CLIENT_API_URL}/albums/${albumId}/assets`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ asset_ids: assetIds }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error((data as { detail?: string }).detail ?? "Failed to add to album");
+  }
+}
+
+export async function removeAssetFromAlbum(
+  token: string,
+  albumId: string,
+  assetId: string
+): Promise<void> {
+  const res = await fetch(`${CLIENT_API_URL}/albums/${albumId}/assets/${assetId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error((data as { detail?: string }).detail ?? "Failed to remove from album");
+  }
+}
+
 export async function createInvitation(
   token: string,
   email: string

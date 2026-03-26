@@ -79,10 +79,27 @@ Update this section at the end of every working session.
 
 ```
 Active milestone : 5 – Albums and organisation
-Last completed  : #28 Google Takeout album import (PR #111, 2026-03-26)
+Last completed  : #29 Albums UI (PR #112, 2026-03-26)
 In progress     : (none)
 Blocked         : (none)
 ```
+
+### Handoff — 2026-03-26 (#29 Albums UI)
+**Completed:**
+- Backend: `AlbumResponse` gains `asset_count` (batch subquery in `list_albums`); also added to `get_album` (from `len(rows)`) and `update_album` (scalar count)
+- Backend: new `GET /albums/{id}/assets` endpoint — returns `AlbumAssetItem` list ordered by `sort_order`; avoids N+1 fetches on album detail page
+- Frontend `api.ts`: `AlbumItem`, `AlbumAssetItem` types; `listAlbums`, `createAlbum`, `getAlbumAssets`, `addAssetsToAlbum`, `removeAssetFromAlbum`
+- `/albums`: grid of album covers (2/3/4 cols), title, asset count, inline "New album" form
+- `/albums/[id]`: `grid-cols-1 sm:grid-cols-3 lg:grid-cols-5` photo grid; hover reveals × button to remove from album; back → Albums
+- `/assets/[id]`: Albums sidebar section — dropdown of user's albums + Add button (shows "Added" after success)
+- Library page: "Photos / Albums" nav in header
+
+**Gotchas:**
+- `GET /albums/{id}/assets` route must be declared before `GET /albums/{id}` in FastAPI's router because FastAPI matches paths in declaration order — currently OK because the new route is added at the bottom but uses the `/assets` suffix path, not a UUID param clash
+- `AlbumResponse.asset_count` is 0 on create (new album has no assets); callers should re-fetch or update local state after adding assets
+- `test_backfill_asset_retries_on_storage_error` was already failing on `main` before this PR — not introduced here
+
+**Suggested next step:** #30 Production Docker Compose config (milestone 6) or any remaining milestone 5 items.
 
 ### Handoff — 2026-03-26 (#28 Google Takeout album import)
 **Completed:**
@@ -267,7 +284,7 @@ Update the status column as issues progress.
 | #92   | Extend search to EXIF metadata fields    | 4         | pr-open |
 | #27   | Albums API (CRUD)                        | 5         | pr-open |
 | #28   | Google Takeout album import              | 5         | pr-open |
-| #29   | Albums UI                                | 5         | backlog |
+| #29   | Albums UI                                | 5         | pr-open |
 | #30   | Production Docker Compose config         | 6         | backlog |
 | #31   | S3-compatible storage abstraction        | 6         | backlog |
 | #32   | Deployment runbook                       | 6         | backlog |
