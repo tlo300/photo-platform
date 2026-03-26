@@ -79,10 +79,28 @@ Update this section at the end of every working session.
 
 ```
 Active milestone : Extra Requirements
-Last completed  : #124 — justified photo grid, day grouping, timeline scrubber (2026-03-26, PR #126)
+Last completed  : hotfixes 2026-03-26 (retroactive SQL fix, upload cache clear button, photo feed fix)
 In progress     : (none)
 Blocked         : (none)
 ```
+
+### Handoff — 2026-03-26 (Hotfixes: SQL date fix, upload cache clear, photo feed fix)
+**Completed:**
+
+**1. Retroactive SQL fix (ran directly against DB, UPDATE 3329):**
+Assets with `captured_at > '2026-03-26 19:00:00+00'` and `original_filename ~* 'photos\s+from\s+\d{4}'` had `captured_at` set to `make_timestamptz(folder_year, 1, 1, 0, 0, 0, 'UTC')`. 675 assets remain with today's timestamp (custom folder names: "Reis naar Italië", "Wintersport 2026", "Untitled", etc.) — no year extractable from path, left as-is. No migration needed.
+
+**2. "Clear upload cache" button (`frontend/src/app/upload/page.tsx`):**
+Small gray underline button added to the /upload page idle phase. Only shown when any `upload_done_*` localStorage keys exist. Clicking it clears all of them. Already committed, not yet in a PR.
+
+**3. Photo feed blank on first load (`frontend/src/app/page.tsx`):**
+The justified grid used `useEffect` for the `ResizeObserver` that measures `containerWidth`. Because `useEffect` fires after paint, the API could return and populate items before the observer fired — `buildRows` returned `[]` when `containerWidth=0`, so date headers rendered but no photos were visible. Fixed by changing that single `useEffect` to `useLayoutEffect` (line ~324). `useLayoutEffect` is now included in the React import.
+
+**Gotchas:**
+- PostgreSQL ARE regex (`~*`) does NOT support `\b` word-boundary anchors at string positions — use bare `photos\s+from\s+\d{4}` instead of `\bphotos?\s+from\s+(\d{4})\b`. The Python `_folder_year` helper uses the re module which does support `\b`, so the Python code is unaffected.
+- `useLayoutEffect` suppresses the "cannot update during an existing state transition" SSR warning in Next.js — this is fine for a client-only page (`"use client"`).
+
+**Suggested next step:** #31 S3-compatible storage abstraction or #32 Deployment runbook.
 
 ### Handoff — 2026-03-26 (#124 Justified photo grid, day grouping, timeline scrubber — PR #126)
 **Completed:**
