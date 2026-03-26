@@ -79,7 +79,7 @@ Update this section at the end of every working session.
 
 ```
 Active milestone : 6 – European server migration readiness
-Last completed  : #30 Production Docker Compose config (PR #114, 2026-03-26)
+Last completed  : Bug fix — duplicate photo not linked to new album (PR #116, 2026-03-26)
 In progress     : (none)
 Blocked         : (none)
 ```
