@@ -79,38 +79,45 @@ Update this section at the end of every working session.
 
 ```
 Active milestone : 6 – European server migration readiness
-Last completed  : Bug fix — wrong photo dates from bad EXIF / millisecond sidecar timestamps (2026-03-26, no PR yet)
+Last completed  : Bug fix — wrong photo dates from bad EXIF / ms timestamps / supplemental-metadata.json / folder-year fallback (2026-03-26, PR #119)
 In progress     : (none)
 Blocked         : (none)
 ```
 
-### Handoff — 2026-03-26 (Bug fix: wrong photo dates)
+### Handoff — 2026-03-26 (Bug fix: wrong photo dates — PR #119)
 **Problem:** Photos with bad camera clocks (e.g. PICT0049.JPG showing 2029 instead of 2003) were not being corrected by the Google Takeout sidecar `photoTakenTime`.
 
-**Root causes found and fixed:**
+**Root causes found and fixed (three layers):**
 
 1. **Millisecond timestamps** (`takeout_sidecar.py` `_parse_timestamp`): some Takeout exports store `photoTakenTime.timestamp` in milliseconds, not seconds. `datetime.fromtimestamp()` raised `OSError` for values > year 9999, returning `None`, causing fallback to wrong EXIF date. Fix: if `ts > 10_000_000_000` divide by 1000. Also added `OverflowError` to exception handler.
 
 2. **Direct upload path ignored sidecars** (`upload_tasks.py`, `upload.py`, `upload/page.tsx`): the `/upload` folder upload had no sidecar support at all. Fixed by:
-   - Frontend: sidecar `.json` files (matching `*.jpg.json` etc.) included in folder mode uploads
+   - Frontend: sidecar `.json` files included in folder mode uploads; sidecars bypass the localStorage done-set so re-uploads always process them; sidecars never added to the done-set
    - API (`upload.py`): `.json` files bypass MIME check and are staged directly to S3
    - Worker: sidecar entries separated from media entries; sidecar lookup built (lowercase keys); passed to `merge_metadata` for new photos and for duplicate detection
    - Worker: **retroactive date fix** — for sidecars whose photo was dedup-filtered on the client, the worker queries for the existing asset by (1) exact full path, (2) basename only, (3) `LIKE '%/basename'`, and updates `captured_at`
+
+3. **`supplemental-metadata.json` sidecar naming** (`takeout_tasks.py`, `upload_tasks.py`, `upload/page.tsx`): older/regional Google Takeout exports name sidecars `PICT0049.JPG.supplemental-metadata.json` instead of `PICT0049.JPG.json`. All three paths now handle both suffixes — frontend regex, worker suffix-strip, sidecar-lookup candidate list in `takeout_tasks.py`.
+
+4. **Folder-year fallback for photos without any sidecar** (`takeout_tasks.py`, `upload_tasks.py`): Google Takeout places photos in `Photos from YYYY` folders. Added `_folder_year(path)` helper (regex `\bphotos?\s+from\s+(\d{4})\b`) — when no sidecar exists and EXIF year disagrees with the folder year, replaces the year while keeping month/day/time intact. Also ran a one-off retroactive SQL UPDATE (`UPDATE 3205`) to fix existing assets that were already imported with wrong years but no sidecar, using `make_timestamptz()` to replace only the year from the folder name.
 
 **Gotchas:**
 - `original_filename` in DB stores whatever `upload.filename` returns from Starlette — can be the full relative path (e.g. `"Photos - sample/Photos from 2003/PICT0049.JPG"`), not just the basename. The `LIKE '%/basename'` fallback is essential.
 - Sidecar lookup keys are always lowercase; media lookup uses `func.lower()` + `or_()` across three match patterns.
 - Upload summary shows "0 imported, 0 duplicates" when re-uploading sidecars-only — expected; dates are fixed silently.
+- Sidecars must bypass the localStorage done-set in the frontend; otherwise a retry after a previous full upload skips all files client-side and the worker never runs.
+- The retroactive SQL UPDATE is a one-time fix; going forward `_folder_year` handles new imports.
 - No DB migration needed.
 
 **Files changed:**
 - `backend/app/services/takeout_sidecar.py` — `_parse_timestamp`, `_MS_THRESHOLD`
 - `backend/app/api/upload.py` — `.json` sidecar bypass
-- `backend/app/worker/upload_tasks.py` — sidecar separation, retroactive fix, duplicate update
-- `frontend/src/app/upload/page.tsx` — `SIDECAR_JSON` filter in folder mode
+- `backend/app/worker/upload_tasks.py` — sidecar separation, retroactive fix, `_folder_year`, supplemental-metadata suffix strip
+- `backend/app/worker/takeout_tasks.py` — supplemental-metadata candidates, `_folder_year` fallback
+- `frontend/src/app/upload/page.tsx` — `SIDECAR_JSON` regex (both suffixes), done-set bypass for sidecars
 - `backend/tests/test_takeout_sidecar.py` — millisecond timestamp test
 
-**Suggested next step:** Open a PR for this bug fix, then continue with #31 S3 abstraction or #32 deployment runbook.
+**Suggested next step:** Continue with #31 S3 abstraction or #32 deployment runbook.
 
 ### Handoff — 2026-03-26 (#91 Direct file and folder upload)
 **Completed:**
