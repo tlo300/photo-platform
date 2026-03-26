@@ -56,6 +56,10 @@ function saveDoneSet(key: string | null, done: Set<string>) {
 type Mode = "files" | "folder";
 type Phase = "idle" | "uploading" | "processing" | "done" | "failed";
 
+function getCacheKeys(): string[] {
+  return Object.keys(localStorage).filter((k) => k.startsWith("upload_done_"));
+}
+
 export default function UploadPage() {
   const { token, ready } = useAuth();
   const router = useRouter();
@@ -71,6 +75,16 @@ export default function UploadPage() {
     speed: number; loaded: number; total: number;
   } | null>(null);
   const [skippedCount, setSkippedCount] = useState(0);
+  const [hasCachedUploads, setHasCachedUploads] = useState(false);
+
+  useEffect(() => {
+    setHasCachedUploads(getCacheKeys().length > 0);
+  }, []);
+
+  function handleClearCache() {
+    getCacheKeys().forEach((k) => localStorage.removeItem(k));
+    setHasCachedUploads(false);
+  }
 
   const filesRef = useRef<HTMLInputElement>(null);
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -347,6 +361,15 @@ export default function UploadPage() {
           >
             Upload
           </button>
+
+          {hasCachedUploads && (
+            <button
+              onClick={handleClearCache}
+              className="text-xs text-gray-400 hover:text-gray-600 underline"
+            >
+              Clear upload cache (re-upload all files next time)
+            </button>
+          )}
         </div>
       )}
 
