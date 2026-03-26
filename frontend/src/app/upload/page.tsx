@@ -20,6 +20,33 @@ import {
   type ImportJobStatus,
 } from "@/lib/api";
 
+const BATCH_SIZE = 200; // max files per POST request
+
+// Fingerprint a file by its relative path + size — good enough to skip re-uploads on retry.
+function fingerprint(file: File): string {
+  return `${file.webkitRelativePath || file.name}|${file.size}`;
+}
+// localStorage key for the folder being uploaded (null for flat file picks).
+// Uses localStorage so the cache survives page refreshes.
+function uploadCacheKey(files: File[]): string | null {
+  const root = files[0]?.webkitRelativePath?.split("/")[0];
+  return root ? `upload_done_${root}` : null;
+}
+function loadDoneSet(key: string | null): Set<string> {
+  if (!key) return new Set();
+  try {
+    return new Set(JSON.parse(localStorage.getItem(key) ?? "[]") as string[]);
+  } catch {
+    return new Set();
+  }
+}
+function saveDoneSet(key: string | null, done: Set<string>) {
+  if (!key) return;
+  try {
+    localStorage.setItem(key, JSON.stringify([...done]));
+  } catch { /* storage full — ignore */ }
+}
+
 type Mode = "files" | "folder";
 type Phase = "idle" | "uploading" | "processing" | "done" | "failed";
 
@@ -37,6 +64,7 @@ export default function UploadPage() {
   const [uploadStats, setUploadStats] = useState<{
     speed: number; loaded: number; total: number;
   } | null>(null);
+  const [skippedCount, setSkippedCount] = useState(0);
 
   const filesRef = useRef<HTMLInputElement>(null);
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -83,57 +111,115 @@ export default function UploadPage() {
     setPhase("uploading");
     setUploadPercent(0);
     setUploadStats(null);
+    setSkippedCount(0);
     uploadStartRef.current = Date.now();
 
-    // For folder uploads, preserve the relative paths; for file uploads these are empty.
-    const paths = selectedFiles.map((f) => f.webkitRelativePath ?? "");
+    // Skip files already confirmed uploaded in a previous attempt this session.
+    const cacheKey = uploadCacheKey(selectedFiles);
+    const done = loadDoneSet(cacheKey);
+    const pairs = selectedFiles
+      .map((f) => ({ file: f, path: f.webkitRelativePath ?? "" }))
+      .filter((p) => !done.has(fingerprint(p.file)));
 
-    let jobId: string;
-    try {
-      jobId = await startDirectUpload(token, selectedFiles, paths, null, (percent, loaded, total) => {
-        setUploadPercent(percent);
-        const elapsed = (Date.now() - uploadStartRef.current) / 1000;
-        const speed = elapsed > 0 ? loaded / elapsed : 0;
-        setUploadStats({ speed, loaded, total });
-      });
-    } catch (err) {
-      if (err instanceof UploadPreflightError) {
-        // All files failed validation — synthesise a job result and show the error panel
-        setJob({
-          job_id: "",
-          status: "failed",
-          total: err.errors.length,
-          processed: 0,
-          duplicates: 0,
-          errors: err.errors,
-        });
-        setPhase("failed");
-      } else {
-        setErrorMessage(err instanceof Error ? err.message : "Upload failed");
-        setPhase("idle");
-      }
+    const skipped = selectedFiles.length - pairs.length;
+    setSkippedCount(skipped);
+
+    if (pairs.length === 0) {
+      // Every file was already uploaded — jump straight to done.
+      setJob({ job_id: "", status: "done", total: 0, processed: 0, duplicates: selectedFiles.length, errors: [] });
+      setPhase("done");
       return;
+    }
+
+    const filesToUpload = pairs.map((p) => p.file);
+    const pathsToUpload = pairs.map((p) => p.path);
+    const totalBytes = filesToUpload.reduce((sum, f) => sum + f.size, 0);
+
+    // Split into batches so no single POST carries the whole folder.
+    const batches: Array<{ files: File[]; paths: string[] }> = [];
+    for (let i = 0; i < filesToUpload.length; i += BATCH_SIZE) {
+      batches.push({
+        files: filesToUpload.slice(i, i + BATCH_SIZE),
+        paths: pathsToUpload.slice(i, i + BATCH_SIZE),
+      });
+    }
+
+    const jobIds: string[] = [];
+    let bytesBeforeBatch = 0;
+
+    for (const batch of batches) {
+      let jobId: string;
+      try {
+        jobId = await startDirectUpload(
+          token,
+          batch.files,
+          batch.paths,
+          null,
+          (_percent, batchLoaded) => {
+            const overallLoaded = bytesBeforeBatch + batchLoaded;
+            const percent = totalBytes > 0 ? Math.round((overallLoaded / totalBytes) * 100) : 0;
+            const elapsed = (Date.now() - uploadStartRef.current) / 1000;
+            const speed = elapsed > 0 ? overallLoaded / elapsed : 0;
+            setUploadPercent(percent);
+            setUploadStats({ speed, loaded: overallLoaded, total: totalBytes });
+          }
+        );
+      } catch (err) {
+        if (err instanceof UploadPreflightError) {
+          setJob({
+            job_id: "",
+            status: "failed",
+            total: err.errors.length,
+            processed: 0,
+            duplicates: 0,
+            errors: err.errors,
+          });
+          setPhase("failed");
+        } else {
+          setErrorMessage(err instanceof Error ? err.message : "Upload failed");
+          setPhase("idle");
+        }
+        return;
+      }
+      jobIds.push(jobId);
+
+      // Persist fingerprints so a retry can skip this batch.
+      batch.files.forEach((f) => done.add(fingerprint(f)));
+      saveDoneSet(cacheKey, done);
+
+      bytesBeforeBatch += batch.files.reduce((sum, f) => sum + f.size, 0);
     }
 
     setPhase("processing");
     processingStartRef.current = Date.now();
-    pollJob(token, jobId);
+    pollJobs(token, jobIds);
   }
 
-  function pollJob(authToken: string, jobId: string) {
+  function pollJobs(authToken: string, jobIds: string[]) {
     async function tick() {
       try {
-        const status = await getImportJob(authToken, jobId);
-        setJob(status);
-        if (status.status === "done" || status.status === "failed") {
-          setPhase(status.status);
+        const statuses = await Promise.all(jobIds.map((id) => getImportJob(authToken, id)));
+        const allDone = statuses.every((s) => s.status === "done" || s.status === "failed");
+        const anyFailed = statuses.some((s) => s.status === "failed");
+        const knownTotal = statuses.some((s) => s.total != null)
+          ? statuses.reduce((sum, s) => sum + (s.total ?? 0), 0)
+          : null;
+        const aggregated: ImportJobStatus = {
+          job_id: jobIds[0],
+          status: allDone ? (anyFailed ? "failed" : "done") : "processing",
+          total: knownTotal,
+          processed: statuses.reduce((sum, s) => sum + s.processed, 0),
+          duplicates: statuses.reduce((sum, s) => sum + s.duplicates, 0),
+          errors: statuses.flatMap((s) => s.errors),
+        };
+        setJob(aggregated);
+        if (allDone) {
+          setPhase(anyFailed ? "failed" : "done");
         } else {
           pollRef.current = setTimeout(tick, 2000);
         }
       } catch (err) {
-        setErrorMessage(
-          err instanceof Error ? err.message : "Failed to fetch job status"
-        );
+        setErrorMessage(err instanceof Error ? err.message : "Failed to fetch job status");
         setPhase("failed");
       }
     }
@@ -239,6 +325,9 @@ export default function UploadPage() {
       {phase === "uploading" && (
         <div className="flex flex-col items-center gap-3 w-full max-w-sm">
           <p className="text-sm text-gray-600">Uploading… {uploadPercent}%</p>
+          {skippedCount > 0 && (
+            <p className="text-xs text-green-600">{skippedCount.toLocaleString()} files skipped (already uploaded)</p>
+          )}
           <div className="w-full h-3 rounded-full bg-gray-200">
             <div
               className="h-3 rounded-full bg-blue-500 transition-all duration-200"
