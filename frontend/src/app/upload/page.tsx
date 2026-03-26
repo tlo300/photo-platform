@@ -16,6 +16,7 @@ import { useAuth } from "@/context/AuthContext";
 import {
   startDirectUpload,
   getImportJob,
+  UploadPreflightError,
   type ImportJobStatus,
 } from "@/lib/api";
 
@@ -96,8 +97,21 @@ export default function UploadPage() {
         setUploadStats({ speed, loaded, total });
       });
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : "Upload failed");
-      setPhase("idle");
+      if (err instanceof UploadPreflightError) {
+        // All files failed validation — synthesise a job result and show the error panel
+        setJob({
+          job_id: "",
+          status: "failed",
+          total: err.errors.length,
+          processed: 0,
+          duplicates: 0,
+          errors: err.errors,
+        });
+        setPhase("failed");
+      } else {
+        setErrorMessage(err instanceof Error ? err.message : "Upload failed");
+        setPhase("idle");
+      }
       return;
     }
 
@@ -347,7 +361,7 @@ export default function UploadPage() {
                 <span>{expandedErrors ? "▲" : "▼"}</span>
               </button>
               {expandedErrors && (
-                <ul className="divide-y divide-red-100 border-t border-red-100">
+                <ul className="max-h-64 overflow-y-auto divide-y divide-red-100 border-t border-red-100">
                   {job.errors.map((e, i) => (
                     <li key={i} className="px-4 py-2">
                       <p className="text-sm font-medium text-gray-700">

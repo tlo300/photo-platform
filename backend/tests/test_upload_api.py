@@ -3,12 +3,13 @@
 Covers:
   1. POST /upload — single valid image → 202 + job_id
   2. POST /upload — multiple files → 202
-  3. POST /upload — unsupported file type → 400
-  4. POST /upload — unauthenticated → 401
-  5. POST /upload — no files → 400
-  6. POST /upload — with album_id → 202
-  7. GET /import/jobs/{job_id} — job created by upload is visible to owner
-  8. GET /import/jobs/{job_id} — another user cannot see upload job (RLS)
+  3. POST /upload — unsupported file type (all invalid) → 422 with per-file errors
+  4. POST /upload — mixed valid + invalid files → 202; invalid pre-recorded in job.errors
+  5. POST /upload — unauthenticated → 401
+  6. POST /upload — no files → 422
+  7. POST /upload — with album_id → 202
+  8. GET /import/jobs/{job_id} — job created by upload is visible to owner
+  9. GET /import/jobs/{job_id} — another user cannot see upload job (RLS)
 
 Celery tasks and S3 are mocked; no Redis or MinIO required.
 
@@ -260,15 +261,54 @@ async def test_upload_multiple_files_returns_job_id(user_token: str):
 
 
 @pytest.mark.asyncio
-async def test_upload_unsupported_type_returns_400(user_token: str):
-    """A plain text file → 400."""
+async def test_upload_unsupported_type_returns_422(user_token: str):
+    """A plain text file → 422 with per-file error list."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post(
             UPLOAD_URL,
             files=[("files", ("doc.txt", b"Hello world", "text/plain"))],
             headers={"Authorization": f"Bearer {user_token}"},
         )
-    assert resp.status_code == 400
+    assert resp.status_code == 422
+    body = resp.json()
+    assert "errors" in body
+    assert len(body["errors"]) == 1
+    assert body["errors"][0]["filename"] == "doc.txt"
+
+
+@pytest.mark.asyncio
+async def test_upload_mixed_files_partial_success(user_token: str):
+    """Valid + invalid files in one batch → 202; invalid ones recorded in job.errors."""
+    with (
+        patch("app.api.upload.storage_service._client") as mock_s3,
+        patch("app.api.upload.process_direct_upload") as mock_task,
+    ):
+        mock_s3.upload_fileobj.return_value = None
+        mock_task.delay.return_value = MagicMock()
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.post(
+                UPLOAD_URL,
+                files=[
+                    ("files", ("good.jpg", _minimal_jpeg(), "image/jpeg")),
+                    ("files", ("bad.txt", b"not media", "text/plain")),
+                ],
+                headers={"Authorization": f"Bearer {user_token}"},
+            )
+
+    assert resp.status_code == 202, resp.text
+    job_id = resp.json()["job_id"]
+
+    # The job should have the invalid file pre-recorded as an error
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        job_resp = await client.get(
+            f"/import/jobs/{job_id}",
+            headers={"Authorization": f"Bearer {user_token}"},
+        )
+    assert job_resp.status_code == 200
+    job = job_resp.json()
+    assert len(job["errors"]) == 1
+    assert job["errors"][0]["filename"] == "bad.txt"
 
 
 @pytest.mark.asyncio
