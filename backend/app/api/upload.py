@@ -28,7 +28,8 @@ from typing import Annotated
 
 import filetype as _filetype
 from botocore.exceptions import ClientError
-from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, Form, UploadFile, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,7 +37,7 @@ from app.core.config import settings
 from app.core.dependencies import get_current_user
 from app.db import get_authed_session
 from app.models.import_job import ImportJob, ImportJobStatus
-from app.services.storage import StorageError, storage_service
+from app.services.storage import storage_service
 from app.services.upload_validation import ALLOWED_MIME_TYPES
 from app.worker.upload_tasks import process_direct_upload
 
@@ -63,6 +64,11 @@ class StartUploadResponse(BaseModel):
     job_id: str
 
 
+class FileError(BaseModel):
+    filename: str | None
+    reason: str
+
+
 def _detect_mime(data: bytes) -> str | None:
     """Return detected MIME type or None if unsupported."""
     kind = _filetype.guess(data[:512])
@@ -82,7 +88,7 @@ async def start_direct_upload(
     album_id: uuid.UUID | None = None,
     user_id: uuid.UUID = Depends(get_current_user),
     session: AsyncSession = Depends(get_authed_session),
-) -> StartUploadResponse:
+) -> StartUploadResponse | JSONResponse:
     """Accept media files and queue them for background ingestion.
 
     Files are validated (size + magic bytes), staged to S3, then processed
@@ -90,81 +96,82 @@ async def start_direct_upload(
     ``GET /import/jobs/{job_id}`` to track progress.
     """
     if not files:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="At least one file is required.",
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            content={"errors": [{"filename": None, "reason": "At least one file is required."}]},
         )
 
     job_id = uuid.uuid4()
     staged: list[dict] = []  # {key, filename, rel_path}
-    staged_keys_to_rollback: list[str] = []
+    pre_errors: list[dict] = []  # validation/staging failures collected per-file
 
     # Align paths list with files list; pad with empty strings if shorter
     resolved_paths: list[str] = list(paths or [])
     while len(resolved_paths) < len(files):
         resolved_paths.append("")
 
-    try:
-        for index, (upload, rel_path) in enumerate(zip(files, resolved_paths)):
-            data = await upload.read()
+    for index, (upload, rel_path) in enumerate(zip(files, resolved_paths)):
+        filename = upload.filename or f"file_{index}"
+        data = await upload.read()
 
-            # Per-file size guard
-            if len(data) > settings.max_upload_size_bytes:
-                raise HTTPException(
-                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                    detail=(
-                        f"File '{upload.filename}' exceeds the maximum allowed size of "
-                        f"{settings.max_upload_size_bytes} bytes."
-                    ),
-                )
-
-            # MIME detection via magic bytes (not declared Content-Type — browsers
-            # mis-report HEIC and other formats)
-            mime = _detect_mime(data)
-            if mime is None:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=(
-                        f"File '{upload.filename}' is not a supported media type. "
-                        f"Allowed types: {', '.join(sorted(ALLOWED_MIME_TYPES))}"
-                    ),
-                )
-
-            suffix = _SUFFIX_MAP.get(mime, "")
-            key = _STAGING_KEY_TMPL.format(
-                user_id=user_id, job_id=job_id, index=index, suffix=suffix
-            )
-
-            try:
-                storage_service._client.upload_fileobj(
-                    io.BytesIO(data),
-                    storage_service._bucket,
-                    key,
-                    ExtraArgs={"ContentType": mime},
-                )
-            except ClientError as exc:
-                raise HTTPException(
-                    status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail=f"Failed to stage file '{upload.filename}': {exc}",
-                ) from exc
-
-            staged_keys_to_rollback.append(key)
-            staged.append(
+        # Per-file size guard
+        if len(data) > settings.max_upload_size_bytes:
+            pre_errors.append(
                 {
-                    "key": key,
-                    "filename": upload.filename or f"file_{index}",
-                    "rel_path": rel_path,
+                    "filename": filename,
+                    "reason": (
+                        f"Exceeds the maximum allowed size of "
+                        f"{settings.max_upload_size_bytes // (1024 * 1024)} MB."
+                    ),
                 }
             )
+            continue
 
-    except HTTPException:
-        # Clean up any files already staged before re-raising
-        for k in staged_keys_to_rollback:
-            try:
-                storage_service.delete(k)
-            except StorageError:
-                pass
-        raise
+        # MIME detection via magic bytes (not declared Content-Type — browsers
+        # mis-report HEIC and other formats)
+        mime = _detect_mime(data)
+        if mime is None:
+            pre_errors.append(
+                {
+                    "filename": filename,
+                    "reason": (
+                        f"Unsupported file type. "
+                        f"Allowed types: {', '.join(sorted(ALLOWED_MIME_TYPES))}"
+                    ),
+                }
+            )
+            continue
+
+        suffix = _SUFFIX_MAP.get(mime, "")
+        key = _STAGING_KEY_TMPL.format(
+            user_id=user_id, job_id=job_id, index=index, suffix=suffix
+        )
+
+        try:
+            storage_service._client.upload_fileobj(
+                io.BytesIO(data),
+                storage_service._bucket,
+                key,
+                ExtraArgs={"ContentType": mime},
+            )
+        except ClientError as exc:
+            pre_errors.append({"filename": filename, "reason": f"Failed to stage: {exc}"})
+            continue
+
+        staged.append(
+            {
+                "key": key,
+                "filename": filename,
+                "rel_path": rel_path,
+            }
+        )
+
+    # If nothing staged successfully, return all errors without creating a job
+    if not staged:
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            content={"errors": pre_errors},
+        )
 
     job = ImportJob(
         id=job_id,
@@ -172,6 +179,7 @@ async def start_direct_upload(
         status=ImportJobStatus.pending,
         upload_keys=staged,
         target_album_id=album_id,
+        errors=pre_errors,  # pre-populate with validation failures
     )
     session.add(job)
     await session.commit()

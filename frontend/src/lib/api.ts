@@ -137,13 +137,28 @@ export async function listInvitations(
   return res.json();
 }
 
+export interface FileError {
+  filename: string | null;
+  reason: string;
+}
+
 export interface ImportJobStatus {
   job_id: string;
   status: "pending" | "processing" | "done" | "failed";
   total: number | null;
   processed: number;
   duplicates: number;
-  errors: { filename: string | null; reason: string }[];
+  errors: FileError[];
+}
+
+/** Thrown by startDirectUpload when the server rejects every file before creating a job. */
+export class UploadPreflightError extends Error {
+  errors: FileError[];
+  constructor(errors: FileError[]) {
+    super(`${errors.length} file(s) failed validation`);
+    this.name = "UploadPreflightError";
+    this.errors = errors;
+  }
 }
 
 export function startTakeoutImport(
@@ -172,6 +187,13 @@ export function startTakeoutImport(
           resolve(data.job_id);
         } catch {
           reject(new Error("Unexpected response from server"));
+        }
+      } else if (xhr.status === 422) {
+        try {
+          const data = JSON.parse(xhr.responseText) as { errors?: FileError[] };
+          reject(new UploadPreflightError(data.errors ?? []));
+        } catch {
+          reject(new Error(`Upload failed (${xhr.status})`));
         }
       } else {
         try {
@@ -209,7 +231,7 @@ export function startDirectUpload(
   files: File[],
   paths: string[],
   albumId: string | null,
-  onUploadProgress: (percent: number) => void
+  onUploadProgress: (percent: number, loaded: number, total: number) => void
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -231,7 +253,7 @@ export function startDirectUpload(
 
     xhr.upload.addEventListener("progress", (e) => {
       if (e.lengthComputable) {
-        onUploadProgress(Math.round((e.loaded / e.total) * 100));
+        onUploadProgress(Math.round((e.loaded / e.total) * 100), e.loaded, e.total);
       }
     });
 

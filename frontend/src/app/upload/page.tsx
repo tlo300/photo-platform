@@ -16,6 +16,7 @@ import { useAuth } from "@/context/AuthContext";
 import {
   startDirectUpload,
   getImportJob,
+  UploadPreflightError,
   type ImportJobStatus,
 } from "@/lib/api";
 
@@ -33,9 +34,14 @@ export default function UploadPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [expandedErrors, setExpandedErrors] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [uploadStats, setUploadStats] = useState<{
+    speed: number; loaded: number; total: number;
+  } | null>(null);
 
   const filesRef = useRef<HTMLInputElement>(null);
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const uploadStartRef = useRef<number>(0);
+  const processingStartRef = useRef<number>(0);
 
   useEffect(() => {
     if (ready && !token) {
@@ -56,7 +62,18 @@ export default function UploadPage() {
   }
 
   function handleFilesChange(e: React.ChangeEvent<HTMLInputElement>) {
-    setSelectedFiles(Array.from(e.target.files ?? []));
+    const all = Array.from(e.target.files ?? []);
+    // Filter to media files only — browsers ignore accept="" for webkitdirectory
+    // picks, so JSON sidecars and other non-media files arrive here unfiltered.
+    // On Windows, .json files often report empty type, so we also exclude by
+    // extension. Keep other empty-type files (HEIC/HEIF browser behaviour).
+    const NON_MEDIA_EXT = /\.(json|xml|html|txt|csv|pdf|zip|db|ini|cfg)$/i;
+    const media = all.filter(
+      (f) =>
+        !NON_MEDIA_EXT.test(f.name) &&
+        (f.type === "" || f.type.startsWith("image/") || f.type.startsWith("video/"))
+    );
+    setSelectedFiles(media);
   }
 
   async function handleUpload() {
@@ -65,20 +82,41 @@ export default function UploadPage() {
     setErrorMessage(null);
     setPhase("uploading");
     setUploadPercent(0);
+    setUploadStats(null);
+    uploadStartRef.current = Date.now();
 
     // For folder uploads, preserve the relative paths; for file uploads these are empty.
     const paths = selectedFiles.map((f) => f.webkitRelativePath ?? "");
 
     let jobId: string;
     try {
-      jobId = await startDirectUpload(token, selectedFiles, paths, null, setUploadPercent);
+      jobId = await startDirectUpload(token, selectedFiles, paths, null, (percent, loaded, total) => {
+        setUploadPercent(percent);
+        const elapsed = (Date.now() - uploadStartRef.current) / 1000;
+        const speed = elapsed > 0 ? loaded / elapsed : 0;
+        setUploadStats({ speed, loaded, total });
+      });
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : "Upload failed");
-      setPhase("idle");
+      if (err instanceof UploadPreflightError) {
+        // All files failed validation — synthesise a job result and show the error panel
+        setJob({
+          job_id: "",
+          status: "failed",
+          total: err.errors.length,
+          processed: 0,
+          duplicates: 0,
+          errors: err.errors,
+        });
+        setPhase("failed");
+      } else {
+        setErrorMessage(err instanceof Error ? err.message : "Upload failed");
+        setPhase("idle");
+      }
       return;
     }
 
     setPhase("processing");
+    processingStartRef.current = Date.now();
     pollJob(token, jobId);
   }
 
@@ -207,32 +245,79 @@ export default function UploadPage() {
               style={{ width: `${uploadPercent}%` }}
             />
           </div>
+          {uploadStats && uploadStats.speed > 0 && (() => {
+            const fmt = (b: number) =>
+              b >= 1024 * 1024 ? `${(b / (1024 * 1024)).toFixed(1)} MB`
+              : b >= 1024 ? `${(b / 1024).toFixed(0)} KB`
+              : `${b} B`;
+            const fmtSpeed = (b: number) =>
+              b >= 1024 * 1024 ? `${(b / (1024 * 1024)).toFixed(1)} MB/s`
+              : `${(b / 1024).toFixed(0)} KB/s`;
+            const remaining = uploadStats.total - uploadStats.loaded;
+            const etaSec = uploadStats.speed > 0 ? remaining / uploadStats.speed : 0;
+            const eta = etaSec > 60
+              ? `${Math.floor(etaSec / 60)}m ${Math.round(etaSec % 60)}s`
+              : `${Math.round(etaSec)}s`;
+            return (
+              <div className="w-full flex justify-between text-xs text-gray-500">
+                <span>{fmt(uploadStats.loaded)} / {fmt(uploadStats.total)}</span>
+                <span>{fmtSpeed(uploadStats.speed)}</span>
+                <span>{eta} left</span>
+              </div>
+            );
+          })()}
         </div>
       )}
 
       {/* ---- Phase: processing ---- */}
       {phase === "processing" && (
         <div className="flex flex-col items-center gap-3 w-full max-w-sm">
-          <p className="text-sm text-gray-600">Processing…</p>
-          {job && job.total != null && (
+          {job && job.total != null ? (() => {
+            const pct = Math.round((job.processed / job.total) * 100);
+            const elapsed = (Date.now() - processingStartRef.current) / 1000;
+            const rate = elapsed > 1 && job.processed > 0 ? job.processed / elapsed : 0;
+            const remaining = job.total - job.processed;
+            const etaSec = rate > 0 ? remaining / rate : null;
+            const eta = etaSec == null ? null
+              : etaSec > 60 ? `${Math.floor(etaSec / 60)}m ${Math.round(etaSec % 60)}s`
+              : `${Math.round(etaSec)}s`;
+            return (
+              <>
+                <div className="w-full flex justify-between text-sm text-gray-600">
+                  <span>Processing…</span>
+                  <span>{pct}%</span>
+                </div>
+                <div className="w-full h-3 rounded-full bg-gray-200">
+                  <div
+                    className="h-3 rounded-full bg-green-500 transition-all duration-300"
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+                <div className="w-full flex justify-between text-xs text-gray-500">
+                  <span>{job.processed} / {job.total} files</span>
+                  {rate > 0 && <span>{rate.toFixed(1)} files/s</span>}
+                  {eta && <span>{eta} left</span>}
+                </div>
+                {(job.duplicates > 0 || job.errors.length > 0) && (
+                  <div className="w-full flex gap-3 text-xs">
+                    {job.duplicates > 0 && (
+                      <span className="text-gray-400">{job.duplicates} duplicate{job.duplicates !== 1 ? "s" : ""}</span>
+                    )}
+                    {job.errors.length > 0 && (
+                      <span className="text-red-400">{job.errors.length} error{job.errors.length !== 1 ? "s" : ""}</span>
+                    )}
+                  </div>
+                )}
+              </>
+            );
+          })() : (
             <>
-              <p className="text-sm text-gray-500">
-                {job.processed} / {job.total} files
-              </p>
-              <div className="w-full h-3 rounded-full bg-gray-200">
-                <div
-                  className="h-3 rounded-full bg-green-500 transition-all duration-300"
-                  style={{
-                    width: `${Math.round((job.processed / job.total) * 100)}%`,
-                  }}
-                />
+              <p className="text-sm text-gray-600">Processing…</p>
+              <div className="w-full h-3 rounded-full bg-gray-200 overflow-hidden">
+                <div className="h-3 w-1/3 rounded-full bg-green-500 animate-pulse" />
               </div>
+              <p className="text-xs text-gray-400">Waiting for worker to start…</p>
             </>
-          )}
-          {job && job.total == null && (
-            <div className="w-full h-3 rounded-full bg-gray-200 overflow-hidden">
-              <div className="h-3 w-1/3 rounded-full bg-green-500 animate-pulse" />
-            </div>
           )}
         </div>
       )}
@@ -276,7 +361,7 @@ export default function UploadPage() {
                 <span>{expandedErrors ? "▲" : "▼"}</span>
               </button>
               {expandedErrors && (
-                <ul className="divide-y divide-red-100 border-t border-red-100">
+                <ul className="max-h-64 overflow-y-auto divide-y divide-red-100 border-t border-red-100">
                   {job.errors.map((e, i) => (
                     <li key={i} className="px-4 py-2">
                       <p className="text-sm font-medium text-gray-700">
