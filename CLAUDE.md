@@ -79,10 +79,30 @@ Update this section at the end of every working session.
 
 ```
 Active milestone : 5 – Albums and organisation
-Last completed  : #29 Albums UI (PR #112, 2026-03-26)
+Last completed  : #91 Direct file and folder upload (PR #113, 2026-03-26)
 In progress     : (none)
 Blocked         : (none)
 ```
+
+### Handoff — 2026-03-26 (#91 Direct file and folder upload)
+**Completed:**
+- Migration 0020: `upload_keys JSONB NULL` and `target_album_id UUID NULL FK` added to `import_jobs`
+- `ImportJob` model updated with new fields
+- `POST /upload`: multipart `files[]`, optional `paths[]` (webkitRelativePath), optional `album_id` query param; magic-byte MIME validation, S3 staging, ImportJob creation, Celery task enqueue
+- `process_direct_upload` Celery task in `upload_tasks.py`: downloads staged files, runs full dedup/EXIF/thumbnail pipeline, creates nested album hierarchy from folder paths, links to target album for flat uploads, deletes staging keys
+- `startDirectUpload()` in `api.ts`: XHR multipart with upload-progress callback
+- `/upload` page: files/folder toggle (webkitdirectory), same upload-% → polling → summary UI as `/import`
+- Library nav: Upload link added between Photos and Albums
+- 8 integration tests: single file, multi-file, unsupported type, no files, unauthenticated, album_id, job poll, RLS isolation — all pass
+
+**Gotchas:**
+- `validate_upload` service is NOT used here — it requires declared Content-Type to match detected MIME, which browsers mis-report for HEIC. The endpoint uses magic-bytes-only detection (same as `_ingest_one` in takeout pipeline).
+- `upload_keys` stores `[{key, filename, rel_path}]` JSON in the job row; task downloads each key from S3 and deletes it after processing (regardless of ingest outcome).
+- For folder uploads: if `rel_path` has directory components → `_ensure_album_path` creates the hierarchy (rooted at `target_album_id` when set). If flat upload + `target_album_id` → link directly. If neither → no album.
+- `_get_or_create_album` and `_link_asset_to_album` are local copies in `upload_tasks.py` to avoid circular imports with `takeout_tasks.py`.
+- No sidecar support for direct uploads — `captured_at` falls back to EXIF date, then `datetime.now()`.
+
+**Suggested next step:** #30 Production Docker Compose config (milestone 6) or another milestone 5 item.
 
 ### Handoff — 2026-03-26 (#29 Albums UI)
 **Completed:**
@@ -285,6 +305,7 @@ Update the status column as issues progress.
 | #27   | Albums API (CRUD)                        | 5         | pr-open |
 | #28   | Google Takeout album import              | 5         | pr-open |
 | #29   | Albums UI                                | 5         | pr-open |
+| #91   | Direct file and folder upload            | 5         | pr-open |
 | #30   | Production Docker Compose config         | 6         | backlog |
 | #31   | S3-compatible storage abstraction        | 6         | backlog |
 | #32   | Deployment runbook                       | 6         | backlog |
