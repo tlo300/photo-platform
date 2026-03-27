@@ -500,3 +500,48 @@ async def backfill_live_photo_dates(
         _task.delay(str(uid))
 
     return BackfillMetadataResponse(enqueued=len(user_ids))
+
+
+# ---------------------------------------------------------------------------
+# POST /admin/backfill-live-photos
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/backfill-live-photos",
+    response_model=BackfillMetadataResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def backfill_live_photos(
+    user_id: uuid.UUID | None = Query(
+        default=None,
+        description="Limit backfill to a specific user. Omit to run for all users.",
+    ),
+    admin_id: uuid.UUID = Depends(get_admin_user),
+    session: AsyncSession = Depends(get_session),
+) -> BackfillMetadataResponse:
+    """Pair pre-existing HEIC/HEIF/JPEG assets with their orphaned MP4/MOV companions.
+
+    Dispatches one live_photo.backfill_pairs Celery task per user (or one task
+    when user_id is supplied).  Each task matches stills to videos by
+    (parent_dir_lower, stem_lower) of original_filename, copies the video to
+    the canonical live key, updates the photo row, and removes the old video row.
+
+    Idempotent — assets already marked is_live_photo=True are skipped.
+    Returns the number of per-user tasks enqueued.
+    """
+    from app.worker.metadata_tasks import backfill_live_photo_pairs
+
+    if user_id is not None:
+        user = await session.scalar(select(User).where(User.id == user_id))
+        if user is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
+        user_ids = [user_id]
+    else:
+        rows = await session.scalars(select(User.id))
+        user_ids = list(rows)
+
+    for uid in user_ids:
+        backfill_live_photo_pairs.delay(str(uid))
+
+    return BackfillMetadataResponse(enqueued=len(user_ids))

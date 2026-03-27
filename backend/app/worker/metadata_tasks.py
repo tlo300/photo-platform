@@ -220,6 +220,136 @@ async def _run_live_photo_backfill(owner_id: uuid.UUID) -> None:
         await engine.dispose()
 
 
+@celery_app.task(name="live_photo.backfill_pairs", bind=True, max_retries=0)
+def backfill_live_photo_pairs(self, owner_id: str) -> None:
+    """Pair pre-existing HEIC/HEIF/JPEG assets with their orphaned MP4/MOV companions.
+
+    For each photo asset (is_live_photo=false, no live_video_key) owned by owner_id,
+    finds a video asset (MP4/MOV) with a matching (parent_dir_lower, stem_lower)
+    derived from original_filename.  Skips ambiguous cases (multiple videos map to
+    the same stem+dir key).
+
+    For each unambiguous match:
+      - S3 copy_object: {user_id}/{mp4_id}/original.ext → {user_id}/{heic_id}/live.ext
+      - Sets is_live_photo=True and live_video_key on the photo row
+      - Deletes the old S3 object
+      - Deletes the MP4 DB row (album_assets cascade)
+      - Does NOT change storage_used_bytes (bytes unchanged, just moved)
+
+    Idempotent — photo assets already marked is_live_photo=True are skipped.
+    """
+    asyncio.run(_run_pair_backfill(uuid.UUID(owner_id)))
+
+
+async def _run_pair_backfill(owner_id: uuid.UUID) -> None:
+    engine = create_async_engine(settings.database_url, pool_pre_ping=True)
+    try:
+        async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+            await _set_rls(session, owner_id)
+
+            # Load candidate photo assets (stills not yet marked as live photos).
+            photo_rows = await session.scalars(
+                select(MediaAsset).where(
+                    MediaAsset.owner_id == owner_id,
+                    MediaAsset.mime_type.in_([
+                        "image/heic", "image/heif", "image/jpeg", "image/png",
+                    ]),
+                    MediaAsset.is_live_photo == False,  # noqa: E712
+                    MediaAsset.live_video_key.is_(None),
+                )
+            )
+            photos = list(photo_rows)
+
+            if not photos:
+                logger.info("Live pair backfill: no unpaired photo assets for user %s", owner_id)
+                return
+
+            # Load all video assets owned by this user.
+            video_rows = await session.scalars(
+                select(MediaAsset).where(
+                    MediaAsset.owner_id == owner_id,
+                    MediaAsset.mime_type.in_(["video/mp4", "video/quicktime"]),
+                )
+            )
+            videos = list(video_rows)
+
+            if not videos:
+                logger.info("Live pair backfill: no video assets for user %s", owner_id)
+                return
+
+            # Build (parent_dir_lower, stem_lower) → [video_asset] map.
+            video_map: dict[tuple[str, str], list[MediaAsset]] = {}
+            for vid in videos:
+                p = PurePosixPath(vid.original_filename)
+                key = (p.parent.as_posix().lower(), p.stem.lower())
+                video_map.setdefault(key, []).append(vid)
+
+            # Drop ambiguous keys (more than one video with same stem+dir).
+            unambiguous = {k: v[0] for k, v in video_map.items() if len(v) == 1}
+            ambiguous_count = sum(1 for v in video_map.values() if len(v) > 1)
+            if ambiguous_count:
+                logger.warning(
+                    "Live pair backfill: skipping %d ambiguous stem+dir key(s) for user %s",
+                    ambiguous_count, owner_id,
+                )
+
+            merged = 0
+            skipped = 0
+            for photo in photos:
+                p = PurePosixPath(photo.original_filename)
+                key = (p.parent.as_posix().lower(), p.stem.lower())
+                video = unambiguous.get(key)
+                if video is None:
+                    skipped += 1
+                    continue
+
+                # Determine extension from the video's storage_key or original_filename.
+                video_ext = PurePosixPath(video.original_filename).suffix.lower()
+                if not video_ext:
+                    video_ext = ".mp4"
+
+                old_key = video.storage_key
+                new_key = f"{owner_id}/{photo.id}/live{video_ext}"
+
+                try:
+                    storage_service._client.copy_object(
+                        Bucket=storage_service._bucket,
+                        CopySource={"Bucket": storage_service._bucket, "Key": old_key},
+                        Key=new_key,
+                    )
+                except Exception as exc:
+                    logger.error(
+                        "Live pair backfill: copy_object failed %s → %s: %s",
+                        old_key, new_key, exc,
+                    )
+                    continue
+
+                # Update photo asset.
+                photo.is_live_photo = True
+                photo.live_video_key = new_key
+
+                # Delete the old S3 object then remove the DB row.
+                try:
+                    storage_service._client.delete_object(
+                        Bucket=storage_service._bucket, Key=old_key
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Live pair backfill: delete_object failed for %s: %s", old_key, exc
+                    )
+
+                await session.delete(video)
+                merged += 1
+
+            await session.commit()
+            logger.info(
+                "Live pair backfill: merged %d pair(s), skipped %d unmatched photo(s) for user %s",
+                merged, skipped, owner_id,
+            )
+    finally:
+        await engine.dispose()
+
+
 @celery_app.task(
     name="metadata.backfill_asset",
     bind=True,
