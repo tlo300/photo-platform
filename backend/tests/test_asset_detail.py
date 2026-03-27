@@ -416,9 +416,12 @@ def _insert_live_photo_asset(engine, owner_id: str) -> str:
 
 @pytest.fixture(scope="module")
 def live_photo_data(migrator_engine, user_token):
+    # Look up the specific user created by user_token (email prefix unique to this module).
+    # Querying "latest user" is fragile when the full suite runs because other_user_token
+    # may be created after user_token's user, returning the wrong owner.
     with migrator_engine.connect() as conn:
         rows = conn.execute(
-            text("SELECT id FROM users WHERE role = 'user' ORDER BY created_at DESC LIMIT 1")
+            text("SELECT id FROM users WHERE email LIKE 'user-detail-%' ORDER BY created_at LIMIT 1")
         ).fetchall()
     user_id = str(rows[0][0])
     live_asset_id = _insert_live_photo_asset(migrator_engine, user_id)
