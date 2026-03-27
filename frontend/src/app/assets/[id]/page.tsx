@@ -47,6 +47,9 @@ export default function AssetDetailPage() {
   const [addError, setAddError] = useState<string | null>(null);
   const [addedAlbumIds, setAddedAlbumIds] = useState<Set<string>>(new Set());
 
+  // "photo" shows the still; "live" plays the companion video.
+  const [liveMode, setLiveMode] = useState<"photo" | "live">("photo");
+
   useEffect(() => {
     if (ready && !token) router.replace("/login");
   }, [ready, token, router]);
@@ -126,6 +129,9 @@ export default function AssetDetailPage() {
   }
 
   const isVideo = asset.mime_type.startsWith("video/");
+  const isHeic = asset.mime_type === "image/heic" || asset.mime_type === "image/heif";
+  const hasLiveVideo = asset.is_live_photo && !!asset.live_video_url;
+
   const capturedAt = asset.captured_at
     ? new Date(asset.captured_at).toLocaleString("en-US", {
         year: "numeric",
@@ -163,16 +169,53 @@ export default function AssetDetailPage() {
 
       <div className="mx-auto max-w-5xl px-4 py-6 lg:flex lg:gap-8">
         {/* Media */}
-        <div className="flex flex-1 items-start justify-center">
+        <div className="flex flex-1 flex-col items-center gap-3">
+          {/* Live photo toggle */}
+          {hasLiveVideo && (
+            <div className="flex rounded-full border border-gray-200 p-0.5 text-sm">
+              <button
+                onClick={() => setLiveMode("photo")}
+                className={`rounded-full px-4 py-1 transition-colors ${
+                  liveMode === "photo"
+                    ? "bg-gray-900 text-white"
+                    : "text-gray-500 hover:text-gray-800"
+                }`}
+              >
+                Photo
+              </button>
+              <button
+                onClick={() => setLiveMode("live")}
+                className={`rounded-full px-4 py-1 transition-colors ${
+                  liveMode === "live"
+                    ? "bg-gray-900 text-white"
+                    : "text-gray-500 hover:text-gray-800"
+                }`}
+              >
+                Live
+              </button>
+            </div>
+          )}
+
+          {/* Media viewer */}
           {isVideo ? (
             <video
               src={asset.full_url}
               controls
               className="max-h-[70vh] w-full rounded object-contain"
             />
+          ) : hasLiveVideo && liveMode === "live" ? (
+            <video
+              key={asset.live_video_url!}
+              src={asset.live_video_url!}
+              autoPlay
+              loop
+              muted
+              playsInline
+              className="max-h-[70vh] w-full rounded object-contain"
+            />
           ) : (
             <img
-              src={asset.full_url}
+              src={isHeic ? (asset.thumbnail_url ?? asset.full_url) : asset.full_url}
               alt={asset.original_filename}
               className="max-h-[70vh] w-full rounded object-contain"
             />
