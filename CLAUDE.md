@@ -79,10 +79,19 @@ Update this section at the end of every working session.
 
 ```
 Active milestone : Extra Requirements
-Last completed  : 2026-03-27 live photo backfill — 1,914 pairs merged (PR #136); direct-upload pairing (PR #135)
+Last completed  : 2026-03-27 fix HEIC display + Photo/Live toggle on asset detail page (PR #140)
 In progress     : (none)
 Blocked         : (none)
 ```
+
+### Handoff — 2026-03-27 (Fix HEIC display + Photo/Live toggle — PR #140)
+**Completed:**
+- `assets/[id]/page.tsx`: HEIC/HEIF assets now display using `thumbnail_url` (JPEG) instead of the raw presigned URL — browsers can't render HEIC natively
+- Added `Photo / Live` pill toggle above the media viewer for live photo assets; Live mode autoplays the companion video looped and muted
+- Fixed React hooks-order error by moving `liveMode` useState before the early returns
+
+**Gotchas:**
+- `liveMode` state must be declared with the other `useState` calls at the top of the component — React rules of hooks forbid any hook call after a conditional/early return
 
 ### Handoff — 2026-03-27 (Live photo pairing for folder/direct upload)
 **Completed:**
