@@ -91,8 +91,10 @@ Blocked         : (none)
 - `frontend/src/app/albums/[id]/page.tsx`: replaced square grid with justified row layout + day grouping + location summaries + `MediaCard` (Live Photo badge and hover-to-play); remove-from-album button kept as absolute overlay; visible-in-feed toggle kept
 
 **Gotchas:**
-- `useEffect` → `useLayoutEffect` for the `ResizeObserver` (same reason as the feed page — prevents a flash where `containerWidth=0` and no rows render)
-- `AlbumAssetItem` cast to `AssetItem` via `as unknown as AssetItem` when passing to `MediaCard` — structurally identical after the field additions
+- The `gridRef` div must always be in the DOM (no early returns that replace the whole page) so the `ResizeObserver` `useLayoutEffect` attaches on mount. Loading/error/empty states are rendered inline instead.
+- Also call `getBoundingClientRect()` immediately after attaching the observer so the first render after load has a non-zero width without waiting for the async callback.
+- `Location` model uses `display_name`, not `locality` — select with `.label("locality")` the same way the assets endpoint does.
+- `AlbumAssetItem` cast to `AssetItem` via `as unknown as AssetItem` when passing to `MediaCard` — structurally identical after the field additions.
 
 ### Handoff — 2026-03-27 (Fix HEIC display + Photo/Live toggle — PR #140)
 **Completed:**
