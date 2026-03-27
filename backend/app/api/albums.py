@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.dependencies import get_current_user
 from app.db import get_authed_session
 from app.models.album import Album, AlbumAsset
-from app.models.media import MediaAsset
+from app.models.media import Location, MediaAsset, MediaMetadata
 from app.services.storage import StorageError, storage_service
 
 router = APIRouter(prefix="/albums", tags=["albums"])
@@ -62,6 +62,10 @@ class AlbumAssetItem(BaseModel):
     captured_at: datetime | None
     thumbnail_ready: bool
     thumbnail_url: str | None
+    width: int | None
+    height: int | None
+    is_live_photo: bool
+    locality: str | None
 
 
 # ---------------------------------------------------------------------------
@@ -444,15 +448,23 @@ async def list_album_assets(
 
     rows = list(
         await session.execute(
-            select(MediaAsset, AlbumAsset.sort_order)
+            select(
+                MediaAsset,
+                AlbumAsset.sort_order,
+                MediaMetadata.width_px,
+                MediaMetadata.height_px,
+                Location.display_name.label("locality"),
+            )
             .join(AlbumAsset, AlbumAsset.asset_id == MediaAsset.id)
+            .outerjoin(MediaMetadata, MediaMetadata.asset_id == MediaAsset.id)
+            .outerjoin(Location, Location.asset_id == MediaAsset.id)
             .where(AlbumAsset.album_id == album_id)
             .order_by(AlbumAsset.sort_order, AlbumAsset.asset_id)
         )
     )
 
     result = []
-    for asset, _sort_order in rows:
+    for asset, _sort_order, width_px, height_px, locality in rows:
         thumb_url: str | None = None
         if asset.thumbnail_ready:
             key = _THUMBNAIL_KEY_TEMPLATE.format(user_id=user_id, asset_id=asset.id)
@@ -468,6 +480,10 @@ async def list_album_assets(
                 captured_at=asset.captured_at,
                 thumbnail_ready=asset.thumbnail_ready,
                 thumbnail_url=thumb_url,
+                width=width_px,
+                height=height_px,
+                is_live_photo=asset.is_live_photo,
+                locality=locality,
             )
         )
     return result

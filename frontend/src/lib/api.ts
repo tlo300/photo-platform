@@ -434,6 +434,10 @@ export interface AlbumAssetItem {
   captured_at: string | null;
   thumbnail_ready: boolean;
   thumbnail_url: string | null;
+  width: number | null;
+  height: number | null;
+  is_live_photo: boolean;
+  locality: string | null;
 }
 
 export type AlbumSort = "title" | "last_modified" | "recent_photo";
