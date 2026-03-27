@@ -79,10 +79,20 @@ Update this section at the end of every working session.
 
 ```
 Active milestone : Extra Requirements
-Last completed  : 2026-03-27 fix HEIC display + Photo/Live toggle on asset detail page (PR #140)
+Last completed  : 2026-03-27 album detail feed look + day grouping + Live Photo (PR #141)
 In progress     : (none)
 Blocked         : (none)
 ```
+
+### Handoff — 2026-03-27 (Album detail feed look + day grouping + Live Photo — PR #141)
+**Completed:**
+- `backend/app/api/albums.py`: `AlbumAssetItem` gains `width`, `height`, `is_live_photo`, `locality`; `list_album_assets` outjoins `MediaMetadata` (width/height) and `Location` (locality)
+- `frontend/src/lib/api.ts`: `AlbumAssetItem` interface updated to match
+- `frontend/src/app/albums/[id]/page.tsx`: replaced square grid with justified row layout + day grouping + location summaries + `MediaCard` (Live Photo badge and hover-to-play); remove-from-album button kept as absolute overlay; visible-in-feed toggle kept
+
+**Gotchas:**
+- `useEffect` → `useLayoutEffect` for the `ResizeObserver` (same reason as the feed page — prevents a flash where `containerWidth=0` and no rows render)
+- `AlbumAssetItem` cast to `AssetItem` via `as unknown as AssetItem` when passing to `MediaCard` — structurally identical after the field additions
 
 ### Handoff — 2026-03-27 (Fix HEIC display + Photo/Live toggle — PR #140)
 **Completed:**
