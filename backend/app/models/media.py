@@ -1,7 +1,7 @@
 import uuid
 
 from geoalchemy2 import Geometry
-from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, text
+from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -37,6 +37,10 @@ class MediaAsset(Base):
     thumbnail_error: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )
+    is_live_photo: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    live_video_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[DateTime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
