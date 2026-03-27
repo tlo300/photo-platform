@@ -115,6 +115,59 @@ class StorageService:
             url = url.replace(self._internal_url, settings.storage_public_url, 1)
         return url
 
+    def upload_live_video(
+        self,
+        user_id: str,
+        asset_id: str,
+        file_obj: BinaryIO,
+        suffix: str,
+        content_type: str = "application/octet-stream",
+    ) -> str:
+        """Upload a Live Photo companion video and return the storage key.
+
+        The key is always ``{user_id}/{asset_id}/live{suffix}``, e.g.
+        ``a1b2c3/d4e5f6/live.mov`` or ``a1b2c3/d4e5f6/live.mp4``.
+        """
+        key = f"{user_id}/{asset_id}/live{suffix}"
+        try:
+            self._client.upload_fileobj(
+                file_obj,
+                self._bucket,
+                key,
+                ExtraArgs={"ContentType": content_type},
+            )
+        except ClientError as exc:
+            raise StorageError(f"Upload failed for key {key!r}: {exc}") from exc
+        logger.debug("Uploaded live video %r", key)
+        return key
+
+    def presigned_live_url(
+        self,
+        storage_key: str,
+        expiry_seconds: int = _MAX_PRESIGNED_EXPIRY,
+    ) -> str:
+        """Return a time-limited presigned GET URL for a live video *storage_key*.
+
+        Unlike :meth:`generate_presigned_url` this method takes the full key
+        directly and does not perform an ownership check — the caller is
+        responsible for ensuring the key belongs to the requesting user.
+        Caps *expiry_seconds* at 3600 regardless of the value passed in.
+        """
+        expiry = min(expiry_seconds, _MAX_PRESIGNED_EXPIRY)
+        try:
+            url = self._client.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": self._bucket, "Key": storage_key},
+                ExpiresIn=expiry,
+            )
+        except ClientError as exc:
+            raise StorageError(
+                f"Presigned URL generation failed for key {storage_key!r}: {exc}"
+            ) from exc
+        if settings.storage_public_url:
+            url = url.replace(self._internal_url, settings.storage_public_url, 1)
+        return url
+
     def delete(self, key: str) -> None:
         """Delete the object at *key*."""
         try:

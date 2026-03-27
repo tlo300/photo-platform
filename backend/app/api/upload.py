@@ -18,15 +18,29 @@ POST /upload
 
     Returns 202 with ``{"job_id": "<uuid>"}`` immediately.
     Poll ``GET /import/jobs/{job_id}`` for progress.
+
+POST /upload/single
+    Accepts a single photo (required) and an optional Live Photo companion video.
+    Validates MIME types via magic bytes, uploads directly, and returns 201
+    synchronously (no job queue).
+
+    Form fields
+    -----------
+    photo      — UploadFile (required): JPEG, HEIC, HEIF, PNG, or WebP
+    live_video — UploadFile (optional): video/quicktime or video/mp4
+
+    Returns 201 with ``{"asset_id": "<uuid>", "is_live_photo": bool}``.
 """
 
 from __future__ import annotations
 
+import hashlib
+import io
 import uuid
 
 import filetype as _filetype
 from botocore.exceptions import ClientError
-from fastapi import APIRouter, Depends, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from fastapi.responses import JSONResponse
 from starlette.datastructures import UploadFile as StarletteUploadFile
 from pydantic import BaseModel
@@ -38,8 +52,10 @@ from app.core.dependencies import get_current_user
 from app.db import get_authed_session
 from app.models.import_job import ImportJob, ImportJobStatus
 from app.models.media import MediaAsset
+from app.services.media import media_service
 from app.services.storage import storage_service
 from app.services.upload_validation import ALLOWED_MIME_TYPES
+from app.worker.thumbnail_tasks import generate_thumbnails
 from app.worker.upload_tasks import process_direct_upload
 
 router = APIRouter(prefix="/upload", tags=["upload"])
@@ -320,3 +336,144 @@ async def upload_preflight(
         already_uploaded.extend(lookup.get((name, size), []))
 
     return PreflightResponse(already_uploaded=already_uploaded)
+
+
+# ---------------------------------------------------------------------------
+# Single-file upload (issue #104) — synchronous, supports Live Photos
+# ---------------------------------------------------------------------------
+
+# Allowed photo MIME types for the single-upload endpoint.
+_SINGLE_PHOTO_MIMES: frozenset[str] = frozenset(
+    {"image/jpeg", "image/heic", "image/heif", "image/png", "image/webp"}
+)
+
+# Allowed live-video MIME types for the companion video.
+_SINGLE_VIDEO_MIMES: frozenset[str] = frozenset({"video/quicktime", "video/mp4"})
+
+
+class SingleUploadResponse(BaseModel):
+    asset_id: str
+    is_live_photo: bool
+
+
+@router.post(
+    "/single",
+    status_code=status.HTTP_201_CREATED,
+    response_model=SingleUploadResponse,
+)
+async def upload_single(
+    photo: UploadFile = File(..., description="Photo file (JPEG, HEIC, HEIF, PNG, WebP)"),
+    live_video: UploadFile | None = File(None, description="Optional Live Photo companion video (MOV or MP4)"),
+    user_id: uuid.UUID = Depends(get_current_user),
+    session: AsyncSession = Depends(get_authed_session),
+) -> SingleUploadResponse:
+    """Upload a single photo with an optional Live Photo companion video.
+
+    Validates MIME types via magic bytes, stores the file(s) to S3 under
+    ``{user_id}/{asset_id}/...``, creates a ``MediaAsset`` DB row, and
+    enqueues thumbnail generation.  Returns immediately with status 201.
+    """
+    # ------------------------------------------------------------------
+    # Validate photo MIME via magic bytes
+    # ------------------------------------------------------------------
+    photo_header = await photo.read(512)
+    photo_kind = _filetype.guess(photo_header)
+    if photo_kind is None or photo_kind.mime not in _SINGLE_PHOTO_MIMES:
+        detected = photo_kind.mime if photo_kind else "unknown"
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"Unsupported photo type '{detected}'. "
+                f"Allowed: {', '.join(sorted(_SINGLE_PHOTO_MIMES))}"
+            ),
+        )
+    photo_mime = photo_kind.mime
+
+    # ------------------------------------------------------------------
+    # Validate live video MIME (optional)
+    # ------------------------------------------------------------------
+    live_header: bytes | None = None
+    live_mime: str | None = None
+    if live_video is not None and live_video.filename:
+        live_header = await live_video.read(512)
+        live_kind = _filetype.guess(live_header)
+        if live_kind is None or live_kind.mime not in _SINGLE_VIDEO_MIMES:
+            detected_v = live_kind.mime if live_kind else "unknown"
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"Unsupported live video type '{detected_v}'. "
+                    f"Allowed: {', '.join(sorted(_SINGLE_VIDEO_MIMES))}"
+                ),
+            )
+        live_mime = live_kind.mime
+
+    # ------------------------------------------------------------------
+    # Read full photo bytes, compute SHA-256 checksum
+    # ------------------------------------------------------------------
+    # We already read the first 512 bytes; read the remainder.
+    photo_rest = await photo.read()
+    photo_bytes = photo_header + photo_rest
+
+    checksum = hashlib.sha256(photo_bytes).hexdigest()
+
+    # ------------------------------------------------------------------
+    # Determine suffix from filename or MIME
+    # ------------------------------------------------------------------
+    photo_filename = photo.filename or "upload"
+    if "." in photo_filename:
+        photo_suffix = "." + photo_filename.rsplit(".", 1)[-1].lower()
+    else:
+        photo_suffix = _SUFFIX_MAP.get(photo_mime, "")
+
+    # ------------------------------------------------------------------
+    # Prepare live video object (if provided)
+    # ------------------------------------------------------------------
+    live_video_obj = None
+    live_video_suffix: str | None = None
+    live_video_size_bytes = 0
+
+    if live_mime is not None and live_header is not None and live_video is not None:
+        live_rest = await live_video.read()
+        live_bytes = live_header + live_rest
+        live_video_size_bytes = len(live_bytes)
+
+        live_filename = live_video.filename or "live"
+        if "." in live_filename:
+            live_video_suffix = "." + live_filename.rsplit(".", 1)[-1].lower()
+        else:
+            live_video_suffix = _SUFFIX_MAP.get(live_mime, "")
+
+        live_video_obj = io.BytesIO(live_bytes)
+
+    # ------------------------------------------------------------------
+    # Create asset (uploads to S3 + inserts DB row)
+    # ------------------------------------------------------------------
+    asset_id = uuid.uuid4()
+    asset = await media_service.create_asset(
+        session,
+        user_id=user_id,
+        asset_id=asset_id,
+        file_obj=io.BytesIO(photo_bytes),
+        suffix=photo_suffix,
+        content_type=photo_mime,
+        file_size_bytes=len(photo_bytes),
+        original_filename=photo_filename,
+        mime_type=photo_mime,
+        checksum=checksum,
+        live_video_obj=live_video_obj,
+        live_video_suffix=live_video_suffix,
+        live_video_mime=live_mime,
+        live_video_size_bytes=live_video_size_bytes,
+    )
+    await session.commit()
+
+    # ------------------------------------------------------------------
+    # Enqueue thumbnail generation
+    # ------------------------------------------------------------------
+    generate_thumbnails.delay(str(asset.id), str(user_id))
+
+    return SingleUploadResponse(
+        asset_id=str(asset.id),
+        is_live_photo=asset.is_live_photo,
+    )

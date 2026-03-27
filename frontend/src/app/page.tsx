@@ -11,6 +11,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { getAssets, searchAssets, AssetItem } from "@/lib/api";
+import { MediaCard } from "@/components/MediaCard";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -149,36 +150,26 @@ function groupByDay(items: AssetItem[]): DayGroup[] {
 function JustifiedRow({
   row,
   containerWidth,
+  token,
   onClickAsset,
 }: {
   row: AssetRow;
   containerWidth: number;
+  token: string;
   onClickAsset: (id: string) => void;
 }) {
   const dims = justifyRow(row.assets, containerWidth, TARGET_ROW_HEIGHT, row.isPartial);
   return (
     <div className="flex gap-0.5">
       {row.assets.map((asset, i) => (
-        <Link
+        <MediaCard
           key={asset.id}
-          href={`/assets/${asset.id}`}
+          asset={asset}
+          width={dims[i].width}
+          height={dims[i].height}
+          token={token}
           onClick={() => onClickAsset(asset.id)}
-          style={{ width: dims[i].width, height: dims[i].height, flexShrink: 0 }}
-          className="block overflow-hidden bg-gray-100"
-        >
-          {asset.thumbnail_url ? (
-            <img
-              src={asset.thumbnail_url}
-              alt={asset.original_filename}
-              style={{ width: "100%", height: "100%", objectFit: "cover" }}
-              onError={(e) => {
-                e.currentTarget.style.display = "none";
-              }}
-            />
-          ) : (
-            <div className="h-full w-full animate-pulse bg-gray-200" />
-          )}
-        </Link>
+        />
       ))}
     </div>
   );
@@ -187,10 +178,12 @@ function JustifiedRow({
 function DaySection({
   group,
   containerWidth,
+  token,
   onClickAsset,
 }: {
   group: DayGroup;
   containerWidth: number;
+  token: string;
   onClickAsset: (id: string) => void;
 }) {
   const rows = buildRows(group.assets, containerWidth, TARGET_ROW_HEIGHT);
@@ -208,6 +201,7 @@ function DaySection({
             key={i}
             row={row}
             containerWidth={containerWidth}
+            token={token}
             onClickAsset={onClickAsset}
           />
         ))}
@@ -220,33 +214,25 @@ function DaySection({
 
 function SearchGrid({
   assets,
+  token,
   onClickAsset,
 }: {
   assets: AssetItem[];
+  token: string;
   onClickAsset: (id: string) => void;
 }) {
   return (
     <div className="grid grid-cols-1 gap-0.5 sm:grid-cols-3 lg:grid-cols-5">
       {assets.map((asset) => (
-        <Link
-          key={asset.id}
-          href={`/assets/${asset.id}`}
-          className="aspect-square block overflow-hidden bg-gray-100"
-          onClick={() => onClickAsset(asset.id)}
-        >
-          {asset.thumbnail_url ? (
-            <img
-              src={asset.thumbnail_url}
-              alt={asset.original_filename}
-              className="h-full w-full object-cover"
-              onError={(e) => {
-                e.currentTarget.style.display = "none";
-              }}
-            />
-          ) : (
-            <div className="h-full w-full animate-pulse bg-gray-200" />
-          )}
-        </Link>
+        <div key={asset.id} className="aspect-square overflow-hidden bg-gray-100">
+          <MediaCard
+            asset={asset}
+            width={0}
+            height={0}
+            token={token}
+            onClick={() => onClickAsset(asset.id)}
+          />
+        </div>
       ))}
     </div>
   );
@@ -321,14 +307,17 @@ export default function Home() {
   }, [ready, token, router]);
 
   // Measure container width for justified layout.
+  // Depends on ready+token because the grid div only mounts after auth resolves
+  // (the component returns null before that), so the effect must re-run then.
   useLayoutEffect(() => {
     if (!gridRef.current) return;
+    setContainerWidth(Math.floor(gridRef.current.getBoundingClientRect().width));
     const obs = new ResizeObserver(([entry]) => {
       setContainerWidth(Math.floor(entry.contentRect.width));
     });
     obs.observe(gridRef.current);
     return () => obs.disconnect();
-  }, []);
+  }, [ready, token]);
 
   // Scroll restoration — runs once after first batch renders.
   useEffect(() => {
@@ -504,7 +493,7 @@ export default function Home() {
                 <p className="mt-24 text-center text-gray-400">No results for &ldquo;{query}&rdquo;</p>
               )}
               {!searchLoading && searchResults !== null && searchResults.length > 0 && (
-                <SearchGrid assets={searchResults} onClickAsset={handleAssetClick} />
+                <SearchGrid assets={searchResults} token={token!} onClickAsset={handleAssetClick} />
               )}
             </>
           )}
@@ -526,6 +515,7 @@ export default function Home() {
                     key={group.date}
                     group={group}
                     containerWidth={containerWidth}
+                    token={token!}
                     onClickAsset={handleAssetClick}
                   />
                 ))}

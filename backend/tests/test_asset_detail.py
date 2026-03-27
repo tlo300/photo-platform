@@ -378,3 +378,83 @@ async def test_unauthenticated_returns_401():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/assets/{uuid.uuid4()}")
     assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Live Photo fields (issue #105)
+# ---------------------------------------------------------------------------
+
+
+def _insert_live_photo_asset(engine, owner_id: str) -> str:
+    """Insert a Live Photo asset (is_live_photo=True, live_video_key set). Returns asset UUID."""
+    asset_id = str(uuid.uuid4())
+    storage_key = f"{owner_id}/{asset_id}/original.jpg"
+    live_video_key = f"{owner_id}/{asset_id}/live.mp4"
+    checksum = hashlib.sha256(asset_id.encode()).hexdigest()
+
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO media_assets"
+                " (id, owner_id, original_filename, mime_type, storage_key,"
+                "  file_size_bytes, checksum, is_live_photo, live_video_key)"
+                " VALUES (:id, :owner_id, :fn, :mime, :key, :size, :chk, true, :lvk)"
+            ),
+            {
+                "id": asset_id,
+                "owner_id": owner_id,
+                "fn": "livephoto.jpg",
+                "mime": "image/jpeg",
+                "key": storage_key,
+                "size": 4096,
+                "chk": checksum,
+                "lvk": live_video_key,
+            },
+        )
+    return asset_id
+
+
+@pytest.fixture(scope="module")
+def live_photo_data(migrator_engine, user_token):
+    with migrator_engine.connect() as conn:
+        rows = conn.execute(
+            text("SELECT id FROM users WHERE role = 'user' ORDER BY created_at DESC LIMIT 1")
+        ).fetchall()
+    user_id = str(rows[0][0])
+    live_asset_id = _insert_live_photo_asset(migrator_engine, user_id)
+    return {"user_id": user_id, "live_asset_id": live_asset_id}
+
+
+@pytest.mark.asyncio
+async def test_normal_asset_has_no_live_photo_fields(user_token, test_data):
+    """Normal (non-live) asset returns is_live_photo=False and live_video_url=None."""
+    asset_id = test_data["bare_asset"]
+    with patch("app.api.assets.storage_service.generate_presigned_url", return_value="https://example.com/bare.jpg"):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.get(
+                f"/assets/{asset_id}",
+                headers={"Authorization": f"Bearer {user_token}"},
+            )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["is_live_photo"] is False
+    assert data["live_video_url"] is None
+
+
+@pytest.mark.asyncio
+async def test_live_photo_asset_returns_live_video_url(user_token, live_photo_data):
+    """Live Photo asset returns is_live_photo=True and a non-null live_video_url."""
+    asset_id = live_photo_data["live_asset_id"]
+    with (
+        patch("app.api.assets.storage_service.generate_presigned_url", return_value="https://example.com/photo.jpg"),
+        patch("app.api.assets.storage_service.presigned_live_url", return_value="https://example.com/live.mp4"),
+    ):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.get(
+                f"/assets/{asset_id}",
+                headers={"Authorization": f"Bearer {user_token}"},
+            )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["is_live_photo"] is True
+    assert data["live_video_url"] == "https://example.com/live.mp4"

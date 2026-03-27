@@ -270,15 +270,15 @@ async def _ingest_one(
             canonical = merge_metadata(exif_result, parsed_sidecar)
             if canonical.captured_at is not None:
                 captured = canonical.captured_at
-                # No sidecar: try to correct a wrong camera-clock year using the
-                # "Photos from YYYY" folder name (Google Takeout convention).
-                if parsed_sidecar is None:
-                    year = _folder_year(rel_path)
-                    if year and year != captured.year:
-                        try:
-                            captured = captured.replace(year=year)
-                        except ValueError:
-                            pass  # e.g. Feb 29 in a non-leap year — keep original
+                # Correct a wrong year using the "Photos from YYYY" folder name
+                # (Google Takeout convention). Applied regardless of sidecar presence
+                # because Google controls these folder names and they are reliable.
+                year = _folder_year(rel_path)
+                if year and year != captured.year:
+                    try:
+                        captured = captured.replace(year=year)
+                    except ValueError:
+                        pass  # e.g. Feb 29 in a non-leap year — keep original
                 asset.captured_at = captured
             else:
                 asset.captured_at = datetime.now(timezone.utc)

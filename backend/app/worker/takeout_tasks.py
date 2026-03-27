@@ -64,6 +64,10 @@ def _folder_year(path: str) -> int | None:
 
 # Sidecar extension used by Google Takeout
 _SIDECAR_EXT = ".json"
+
+# Extensions used to identify Live Photo stills (primary) and companion videos.
+_LIVE_STILL_EXTS = frozenset({".heic", ".heif", ".jpg", ".jpeg"})
+_LIVE_VIDEO_EXTS = frozenset({".mp4", ".mov"})
 # Older / region-specific Takeout exports use this suffix instead of ".json".
 _SUPPLEMENTAL_SIDECAR_EXT = ".supplemental-metadata.json"
 
@@ -345,6 +349,45 @@ async def _link_asset_to_album(
 
 
 # ---------------------------------------------------------------------------
+# Live Photo pairing helpers
+# ---------------------------------------------------------------------------
+
+
+def _build_live_photo_pairs(
+    all_names: list[str],
+) -> dict[tuple[str, str], dict[str, zipfile.ZipInfo]]:
+    """Pre-scan *all_names* and return a map of Live Photo still+video pairs.
+
+    Returns a dict keyed by ``(dir_prefix, stem_lower)`` where each value is a
+    sub-dict with one or both of ``"still"`` and ``"video"`` keys holding the
+    raw zip entry name.  Only entries that have **both** a still and a video are
+    considered Live Photo pairs; entries with only one side are ignored during
+    pairing (they will be processed normally by ``_ingest_one``).
+    """
+    # Two-pass: first collect all stills/videos keyed by (dir, stem_lower).
+    candidates: dict[tuple[str, str], dict[str, str]] = {}
+
+    for name in all_names:
+        p = PurePosixPath(name)
+        ext_lower = p.suffix.lower()
+        dir_str = str(p.parent)
+        dir_prefix = "" if dir_str == "." else dir_str
+        stem_lower = p.stem.lower()
+
+        if ext_lower in _LIVE_STILL_EXTS:
+            candidates.setdefault((dir_prefix, stem_lower), {})["still"] = name
+        elif ext_lower in _LIVE_VIDEO_EXTS:
+            candidates.setdefault((dir_prefix, stem_lower), {})["video"] = name
+
+    # Keep only entries that have both sides.
+    return {
+        key: sides
+        for key, sides in candidates.items()
+        if "still" in sides and "video" in sides
+    }
+
+
+# ---------------------------------------------------------------------------
 # Async core — called from the sync Celery task via asyncio.run()
 # ---------------------------------------------------------------------------
 
@@ -388,10 +431,20 @@ async def _process(
                 # Collect media entries and build sidecar lookup by lowercase path
                 all_names = zf.namelist()
                 media_names = [n for n in all_names if _is_media_entry(n)]
-                sidecar_set = {n.lower() for n in all_names if n.lower().endswith(_SIDECAR_EXT)}
+                # Map lowercase entry name → actual entry name for O(1) case-insensitive lookup.
+                sidecar_map = {n.lower(): n for n in all_names if n.lower().endswith(_SIDECAR_EXT)}
 
                 # Pre-scan for album metadata.json and per-photo timestamps.
                 album_index = _build_album_index(zf)
+
+                # Pre-scan for HEIC+MP4/MOV Live Photo pairs sharing the same stem/dir.
+                live_photo_pairs = _build_live_photo_pairs(all_names)
+
+                # Build a set of companion video names for fast O(1) lookup so that
+                # _ingest_one can skip them when they belong to a Live Photo pair.
+                paired_video_names: set[str] = {
+                    sides["video"] for sides in live_photo_pairs.values()
+                }
 
                 job.total = len(media_names)
                 job.status = ImportJobStatus.processing
@@ -400,7 +453,9 @@ async def _process(
 
                 for media_name in media_names:
                     await _ingest_one(
-                        session, job, owner_id, zf, media_name, sidecar_set, album_index
+                        session, job, owner_id, zf, media_name, sidecar_map, album_index,
+                        live_photo_pairs=live_photo_pairs,
+                        paired_video_names=paired_video_names,
                     )
                     job.processed += 1
                     await session.commit()
@@ -418,18 +473,119 @@ async def _process(
         await session.commit()
 
 
+def _read_sidecar_from_path(file_path: Path) -> dict | None:
+    """Find and return the raw sidecar JSON dict for *file_path* on disk, or None.
+
+    Tries the standard '.json' name, the '.supplemental-metadata.json' variant,
+    and the live-photo companion (HEIC/HEIF/JPEG sidecar for an MP4/MOV).
+    """
+    _stem = PurePosixPath(file_path.name).stem
+    candidates: list[str] = [
+        _sidecar_name(file_path.name),
+        file_path.name + _SUPPLEMENTAL_SIDECAR_EXT,
+    ]
+    for _photo_ext in (".heic", ".heif", ".jpg", ".jpeg"):
+        candidates.append(_stem + _photo_ext + _SUPPLEMENTAL_SIDECAR_EXT)
+        candidates.append(_stem + _photo_ext + _SIDECAR_EXT)
+    for candidate_name in candidates:
+        candidate_path = file_path.parent / candidate_name
+        try:
+            return json.loads(candidate_path.read_text("utf-8", errors="replace"))
+        except FileNotFoundError:
+            continue
+        except Exception as exc:
+            logger.warning("Could not read sidecar %s: %s", candidate_path, exc)
+            break
+    return None
+
+
+def _read_sidecar(
+    media_name: str,
+    zf: zipfile.ZipFile,
+    sidecar_map: dict[str, str],
+) -> dict | None:
+    """Find and return the raw sidecar JSON dict for *media_name*, or None.
+
+    Tries the standard '.json' name, the '.supplemental-metadata.json' variant,
+    and the live-photo companion (HEIC/HEIF/JPEG sidecar for an MP4/MOV).
+    All comparisons are case-insensitive; *sidecar_map* maps lowercase→actual name.
+    """
+    _p = PurePosixPath(media_name)
+    _stem = _p.stem
+    _dir = str(_p.parent)
+    _dir_prefix = "" if _dir == "." else _dir + "/"
+    candidates: list[str] = [
+        _sidecar_name(media_name),
+        media_name + _SUPPLEMENTAL_SIDECAR_EXT,
+    ]
+    for _photo_ext in (".heic", ".heif", ".jpg", ".jpeg"):
+        _companion = _dir_prefix + _stem + _photo_ext
+        candidates.append(_companion + _SUPPLEMENTAL_SIDECAR_EXT)
+        candidates.append(_companion + _SIDECAR_EXT)
+    for candidate in candidates:
+        actual = sidecar_map.get(candidate.lower())
+        if actual is not None:
+            try:
+                raw_bytes = zf.read(actual)
+                if raw_bytes:
+                    return json.loads(raw_bytes.decode("utf-8", errors="replace"))
+            except Exception as exc:
+                logger.warning("Could not read sidecar %s: %s", actual, exc)
+            break
+    return None
+
+
+async def _fix_duplicate_date(
+    session: AsyncSession,
+    asset_id: uuid.UUID,
+    sidecar_data: dict | None,
+    context: str,
+) -> None:
+    """Update captured_at on an already-imported asset if the sidecar has a better date."""
+    if sidecar_data is None:
+        return
+    parsed = parse_sidecar(sidecar_data)
+    if parsed is None:
+        return
+    canonical = merge_metadata(None, parsed)
+    if canonical.captured_at is None:
+        return
+    asset = await session.get(MediaAsset, asset_id)
+    if asset is not None:
+        asset.captured_at = canonical.captured_at
+        logger.debug("Updated captured_at for duplicate %s from sidecar", context)
+
+
 async def _ingest_one(
     session: AsyncSession,
     job: ImportJob,
     owner_id: uuid.UUID,
     zf: zipfile.ZipFile,
     media_name: str,
-    sidecar_set: set[str],
+    sidecar_map: dict[str, str],
     album_index: _AlbumIndex | None = None,
+    *,
+    live_photo_pairs: dict[tuple[str, str], dict[str, str]] | None = None,
+    paired_video_names: set[str] | None = None,
 ) -> None:
-    """Ingest a single media file from the zip.  Errors are caught and appended to job.errors."""
+    """Ingest a single media file from the zip.  Errors are caught and appended to job.errors.
+
+    When *live_photo_pairs* and *paired_video_names* are provided (zip import path only):
+      - Video files that are companions in a Live Photo pair are skipped here; they
+        are ingested as part of the matching still file's processing.
+      - Still files (HEIC/JPG) that have a matching companion video are ingested as a
+        single Live Photo asset (one DB row, two S3 objects).
+    """
     import contextlib
     from app.services.storage import StorageError
+
+    # --- Live Photo companion video: skip — ingested as part of the still ---
+    if paired_video_names and media_name in paired_video_names:
+        logger.debug(
+            "Skipping companion video %s — will be ingested with its Live Photo still",
+            media_name,
+        )
+        return
 
     data = zf.read(media_name)
     checksum = _sha256_bytes(data)
@@ -442,11 +598,13 @@ async def _ingest_one(
         )
     )
     if existing is not None:
+        await _fix_duplicate_date(session, existing, _read_sidecar(media_name, zf, sidecar_map), media_name)
         logger.debug("Skipping duplicate %s (checksum %s)", media_name, checksum)
         job.duplicates += 1
         return
 
     staged_key: str | None = None
+    staged_live_key: str | None = None
     try:
         async with session.begin_nested():
             # All DB writes are inside a savepoint — on failure the savepoint is
@@ -467,6 +625,35 @@ async def _ingest_one(
                 mime,
             )
 
+            # --- Live Photo companion video upload ---
+            # Check if this still has a paired companion video in the same dir.
+            live_video_size: int = 0
+            _p = PurePosixPath(media_name)
+            _dir_str = str(_p.parent)
+            _dir_prefix = "" if _dir_str == "." else _dir_str
+            _stem_lower = _p.stem.lower()
+            _pair_key = (_dir_prefix, _stem_lower)
+            _pair_sides = (live_photo_pairs or {}).get(_pair_key)
+            if _pair_sides and "video" in _pair_sides:
+                video_entry_name = _pair_sides["video"]
+                video_zi = zf.getinfo(video_entry_name)
+                live_video_size = video_zi.file_size
+                live_video_suffix = Path(video_entry_name).suffix.lower()
+                live_video_mime = (
+                    "video/mp4" if live_video_suffix == ".mp4" else "video/quicktime"
+                )
+                with zf.open(video_entry_name) as _vid_obj:
+                    staged_live_key = storage_service.upload_live_video(
+                        str(owner_id),
+                        str(asset_id),
+                        _vid_obj,
+                        live_video_suffix,
+                        live_video_mime,
+                    )
+                logger.info(
+                    "Live Photo pair: still=%s video=%s", media_name, video_entry_name
+                )
+
             from app.models.media import MediaAsset as _MA
 
             asset = _MA(
@@ -478,54 +665,26 @@ async def _ingest_one(
                 storage_key=staged_key,
                 checksum=checksum,
             )
+            if staged_live_key is not None:
+                asset.is_live_photo = True
+                asset.live_video_key = staged_live_key
             session.add(asset)
+            total_bytes = len(data) + live_video_size
             await session.execute(
                 text(
                     "UPDATE users"
                     " SET storage_used_bytes = storage_used_bytes + :delta"
                     " WHERE id = :uid"
                 ),
-                {"delta": len(data), "uid": owner_id},
+                {"delta": total_bytes, "uid": owner_id},
             )
             await session.flush()
 
             # EXIF extraction
             exif_result = extract_exif(data, mime)
 
-            # Sidecar lookup — try standard ".json" name, truncated variant, and the
-            # ".supplemental-metadata.json" variant used by some Takeout exports.
-            sidecar_data: dict | None = None
-            _p = PurePosixPath(media_name)
-            _stem = _p.stem
-            _dir = str(_p.parent)
-            _dir_prefix = "" if _dir == "." else _dir + "/"
-            _sidecar_candidates: list[str] = [
-                _sidecar_name(media_name),
-                _sidecar_name(Path(media_name).name),
-                media_name + _SUPPLEMENTAL_SIDECAR_EXT,
-                Path(media_name).name + _SUPPLEMENTAL_SIDECAR_EXT,
-            ]
-            # Live photo companion: iPhone MP4/MOV shares its stem with the HEIC/HEIF still.
-            # Try swapping the extension to find the photo's sidecar (e.g. IMG_4833.HEIC.json).
-            for _photo_ext in (".heic", ".heif", ".jpg", ".jpeg"):
-                _companion = _dir_prefix + _stem + _photo_ext
-                _sidecar_candidates.append(_companion + _SUPPLEMENTAL_SIDECAR_EXT)
-                _sidecar_candidates.append(_companion + _SIDECAR_EXT)
-            for candidate in _sidecar_candidates:
-                if candidate.lower() in sidecar_set:
-                    try:
-                        raw_bytes = zf.read(candidate) if candidate in zf.namelist() else None
-                        if raw_bytes is None:
-                            for real_name in zf.namelist():
-                                if real_name.lower() == candidate.lower():
-                                    raw_bytes = zf.read(real_name)
-                                    break
-                        if raw_bytes:
-                            sidecar_data = json.loads(raw_bytes.decode("utf-8", errors="replace"))
-                    except Exception as exc:
-                        logger.warning("Could not read sidecar %s: %s", candidate, exc)
-                    break
-
+            # Sidecar lookup
+            sidecar_data = _read_sidecar(media_name, zf, sidecar_map)
             parsed_sidecar = parse_sidecar(sidecar_data) if sidecar_data else None
             sidecar_found = parsed_sidecar is not None or sidecar_data is not None
 
@@ -537,15 +696,15 @@ async def _ingest_one(
             canonical = merge_metadata(exif_result, parsed_sidecar)
             if canonical.captured_at is not None:
                 captured = canonical.captured_at
-                # No sidecar: try to correct a wrong camera-clock year using the
-                # "Photos from YYYY" folder name (Google Takeout convention).
-                if not sidecar_found:
-                    year = _folder_year(media_name)
-                    if year and year != captured.year:
-                        try:
-                            captured = captured.replace(year=year)
-                        except ValueError:
-                            pass  # e.g. Feb 29 in a non-leap year — keep original
+                # Correct a wrong year using the "Photos from YYYY" folder name
+                # (Google Takeout convention). Applied regardless of sidecar presence
+                # because Google controls these folder names and they are reliable.
+                year = _folder_year(media_name)
+                if year and year != captured.year:
+                    try:
+                        captured = captured.replace(year=year)
+                    except ValueError:
+                        pass  # e.g. Feb 29 in a non-leap year — keep original
                 asset.captured_at = captured
             elif not sidecar_found:
                 # Neither sidecar nor EXIF provided a date — fall back to the
@@ -590,10 +749,13 @@ async def _ingest_one(
 
     except Exception as exc:
         logger.warning("Failed to ingest %s: %s", media_name, exc)
-        # Clean up the staged S3 object if it was uploaded before the DB write failed
+        # Clean up staged S3 objects if they were uploaded before the DB write failed
         if staged_key is not None:
             with contextlib.suppress(StorageError):
                 storage_service.delete(staged_key)
+        if staged_live_key is not None:
+            with contextlib.suppress(StorageError):
+                storage_service.delete(staged_live_key)
         errors = list(job.errors or [])
         errors.append({"filename": Path(media_name).name, "reason": str(exc)})
         job.errors = errors
@@ -754,6 +916,7 @@ async def _ingest_one_from_path(
         )
     )
     if existing is not None:
+        await _fix_duplicate_date(session, existing, _read_sidecar_from_path(file_path), file_path.name)
         logger.debug("Skipping duplicate %s (checksum %s)", file_path.name, checksum)
         job.duplicates += 1
         return
@@ -800,30 +963,8 @@ async def _ingest_one_from_path(
 
             exif_result = extract_exif(data, mime)
 
-            # Sidecar: look for {filename}.json (or .supplemental-metadata.json) adjacent
-            # to the media file. Try standard and supplemental-metadata naming variants.
-            sidecar_data: dict | None = None
-            _fname_stem = PurePosixPath(file_path.name).stem
-            _sidecar_candidates_path: list[str] = [
-                _sidecar_name(file_path.name),
-                _sidecar_name(PurePosixPath(file_path.name).name),
-                file_path.name + _SUPPLEMENTAL_SIDECAR_EXT,
-                PurePosixPath(file_path.name).name + _SUPPLEMENTAL_SIDECAR_EXT,
-            ]
-            # Live photo companion: iPhone MP4/MOV shares its stem with the HEIC/HEIF still.
-            for _photo_ext in (".heic", ".heif", ".jpg", ".jpeg"):
-                _companion_name = _fname_stem + _photo_ext
-                _sidecar_candidates_path.append(_companion_name + _SUPPLEMENTAL_SIDECAR_EXT)
-                _sidecar_candidates_path.append(_companion_name + _SIDECAR_EXT)
-            for candidate_name in _sidecar_candidates_path:
-                candidate_path = file_path.parent / candidate_name
-                if candidate_path.exists():
-                    try:
-                        sidecar_data = json.loads(candidate_path.read_text("utf-8", errors="replace"))
-                    except Exception as exc:
-                        logger.warning("Could not read sidecar %s: %s", candidate_path, exc)
-                    break
-
+            # Sidecar lookup (standard, supplemental-metadata, live-photo companion).
+            sidecar_data = _read_sidecar_from_path(file_path)
             parsed_sidecar = parse_sidecar(sidecar_data) if sidecar_data else None
             sidecar_found = parsed_sidecar is not None or sidecar_data is not None
 
@@ -834,15 +975,15 @@ async def _ingest_one_from_path(
             canonical = merge_metadata(exif_result, parsed_sidecar)
             if canonical.captured_at is not None:
                 captured = canonical.captured_at
-                # No sidecar: try to correct a wrong camera-clock year using the
-                # "Photos from YYYY" folder name (Google Takeout convention).
-                if not sidecar_found:
-                    year = _folder_year(str(file_path))
-                    if year and year != captured.year:
-                        try:
-                            captured = captured.replace(year=year)
-                        except ValueError:
-                            pass  # e.g. Feb 29 in a non-leap year — keep original
+                # Correct a wrong year using the "Photos from YYYY" folder name
+                # (Google Takeout convention). Applied regardless of sidecar presence
+                # because Google controls these folder names and they are reliable.
+                year = _folder_year(str(file_path))
+                if year and year != captured.year:
+                    try:
+                        captured = captured.replace(year=year)
+                    except ValueError:
+                        pass  # e.g. Feb 29 in a non-leap year — keep original
                 asset.captured_at = captured
             elif not sidecar_found:
                 asset.captured_at = _mtime_from_path(file_path)

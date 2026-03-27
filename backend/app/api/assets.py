@@ -59,6 +59,7 @@ class AssetItem(BaseModel):
     width: int | None
     height: int | None
     locality: str | None
+    is_live_photo: bool
 
 
 class PagedAssetResponse(BaseModel):
@@ -104,6 +105,8 @@ class AssetDetail(BaseModel):
     metadata: AssetMetadata | None
     location: AssetLocation | None
     tags: list[AssetTagItem]
+    is_live_photo: bool
+    live_video_url: str | None
 
 
 # ---------------------------------------------------------------------------
@@ -347,6 +350,7 @@ async def list_assets(
             width=width_px,
             height=height_px,
             locality=locality,
+            is_live_photo=asset.is_live_photo,
         )
         for asset, width_px, height_px, locality in page
     ]
@@ -443,6 +447,7 @@ async def search_assets(
             width=width_px,
             height=height_px,
             locality=locality,
+            is_live_photo=asset.is_live_photo,
         )
         for asset, width_px, height_px, locality in rows
     ]
@@ -501,6 +506,14 @@ async def get_asset(
             detail="Could not generate download URL.",
         )
 
+    # Presigned live video URL (only for Live Photos).
+    live_video_url: str | None = None
+    if asset.is_live_photo and asset.live_video_key:
+        try:
+            live_video_url = storage_service.presigned_live_url(asset.live_video_key)
+        except StorageError:
+            live_video_url = None
+
     return AssetDetail(
         id=asset.id,
         original_filename=asset.original_filename,
@@ -530,6 +543,8 @@ async def get_asset(
             country=loc_row.country,
         ) if loc_row is not None else None,
         tags=[AssetTagItem(name=row.name, source=row.source) for row in tag_rows],
+        is_live_photo=asset.is_live_photo,
+        live_video_url=live_video_url,
     )
 
 
