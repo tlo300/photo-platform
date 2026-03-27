@@ -48,17 +48,38 @@ class MediaService:
         mime_type: str,
         checksum: str,
         captured_at: datetime | None = None,
+        live_video_obj: BinaryIO | None = None,
+        live_video_suffix: str | None = None,
+        live_video_mime: str | None = None,
+        live_video_size_bytes: int = 0,
     ) -> MediaAsset:
         """Upload *file_obj* to S3 and persist a MediaAsset row.
 
-        ``users.storage_used_bytes`` is incremented by *file_size_bytes* in the
-        same flush as the INSERT so both changes either commit or roll back
-        together.  If the S3 upload itself fails the database is never touched.
-        If the DB flush fails the orphaned S3 object is deleted before re-raising.
+        ``users.storage_used_bytes`` is incremented by *file_size_bytes* (and
+        *live_video_size_bytes* when a live video is provided) in the same flush
+        as the INSERT so both changes either commit or roll back together.  If
+        the S3 upload itself fails the database is never touched.  If the DB
+        flush fails the orphaned S3 object(s) are deleted before re-raising.
+
+        When *live_video_obj* is provided (together with *live_video_suffix* and
+        *live_video_mime*) the companion video is stored at
+        ``{user_id}/{asset_id}/live{suffix}`` and the asset is marked as a Live
+        Photo (``is_live_photo=True``, ``live_video_key`` set).
         """
         key = self._storage.upload(
             str(user_id), str(asset_id), file_obj, suffix, content_type
         )
+
+        live_key: str | None = None
+        if live_video_obj is not None:
+            live_key = self._storage.upload_live_video(
+                str(user_id),
+                str(asset_id),
+                live_video_obj,
+                live_video_suffix or "",
+                live_video_mime or "application/octet-stream",
+            )
+
         try:
             asset = MediaAsset(
                 id=asset_id,
@@ -70,19 +91,27 @@ class MediaService:
                 storage_key=key,
                 checksum=checksum,
             )
+            if live_key is not None:
+                asset.is_live_photo = True
+                asset.live_video_key = live_key
+
             session.add(asset)
+            total_bytes = file_size_bytes + live_video_size_bytes
             await session.execute(
                 text(
                     "UPDATE users"
                     " SET storage_used_bytes = storage_used_bytes + :delta"
                     " WHERE id = :uid"
                 ),
-                {"delta": file_size_bytes, "uid": user_id},
+                {"delta": total_bytes, "uid": user_id},
             )
             await session.flush()
         except Exception:
             with contextlib.suppress(StorageError):
                 self._storage.delete(key)
+            if live_key is not None:
+                with contextlib.suppress(StorageError):
+                    self._storage.delete(live_key)
             raise
         return asset
 
