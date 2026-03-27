@@ -13,10 +13,11 @@ Endpoints:
 
 import uuid
 from datetime import datetime
+from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Path, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from pydantic import BaseModel
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, desc, func, nulls_last, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import get_current_user
@@ -149,15 +150,36 @@ async def create_album(
 async def list_albums(
     user_id: uuid.UUID = Depends(get_current_user),
     session: AsyncSession = Depends(get_authed_session),
+    sort: Literal["title", "last_modified", "recent_photo"] = Query(
+        default="title",
+        description=(
+            "Sort order: 'title' (A-Z), 'last_modified' (newest album first), "
+            "'recent_photo' (album with most recent photo first)."
+        ),
+    ),
 ) -> list[AlbumResponse]:
-    """List all albums owned by the authenticated user, ordered by title.
+    """List all albums owned by the authenticated user.
 
     Each album includes a cover_thumbnail_url derived from cover_asset_id when
     set, or from the first asset (lowest sort_order) otherwise.
     """
+    if sort == "recent_photo":
+        recent_photo_sq = (
+            select(func.max(MediaAsset.captured_at))
+            .join(AlbumAsset, AlbumAsset.asset_id == MediaAsset.id)
+            .where(AlbumAsset.album_id == Album.id)
+            .correlate(Album)
+            .scalar_subquery()
+        )
+        order_clause = nulls_last(desc(recent_photo_sq))
+    elif sort == "last_modified":
+        order_clause = desc(Album.created_at)
+    else:
+        order_clause = Album.title
+
     albums = list(
         await session.scalars(
-            select(Album).where(Album.owner_id == user_id).order_by(Album.title)
+            select(Album).where(Album.owner_id == user_id).order_by(order_clause)
         )
     )
 

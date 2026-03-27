@@ -7,7 +7,13 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
-import { listAlbums, createAlbum, updateAlbumHidden, AlbumItem } from "@/lib/api";
+import { listAlbums, createAlbum, updateAlbumHidden, AlbumItem, AlbumSort } from "@/lib/api";
+
+const SORT_LABELS: Record<AlbumSort, string> = {
+  recent_photo: "Most recent photo",
+  last_modified: "Last modified",
+  title: "Album title",
+};
 
 export default function AlbumsPage() {
   const { token, ready } = useAuth();
@@ -16,6 +22,9 @@ export default function AlbumsPage() {
   const [albums, setAlbums] = useState<AlbumItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [sort, setSort] = useState<AlbumSort>("recent_photo");
+  const [sortOpen, setSortOpen] = useState(false);
+  const sortRef = useRef<HTMLDivElement>(null);
 
   // New album form
   const [showForm, setShowForm] = useState(false);
@@ -32,15 +41,27 @@ export default function AlbumsPage() {
   useEffect(() => {
     if (!ready || !token) return;
     setLoading(true);
-    listAlbums(token)
+    listAlbums(token, sort)
       .then(setAlbums)
       .catch((e) => setError(e instanceof Error ? e.message : "Failed to load albums"))
       .finally(() => setLoading(false));
-  }, [ready, token]);
+  }, [ready, token, sort]);
 
   useEffect(() => {
     if (showForm) inputRef.current?.focus();
   }, [showForm]);
+
+  // Close sort dropdown on outside click
+  useEffect(() => {
+    if (!sortOpen) return;
+    function handleClick(e: MouseEvent) {
+      if (sortRef.current && !sortRef.current.contains(e.target as Node)) {
+        setSortOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [sortOpen]);
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -79,7 +100,7 @@ export default function AlbumsPage() {
   return (
     <main className="min-h-screen bg-white px-4 py-6">
       {/* Header */}
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-4 flex items-center justify-between">
         <div className="flex items-center gap-4">
           <Link href="/" className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-900">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
@@ -89,12 +110,56 @@ export default function AlbumsPage() {
           </Link>
           <h1 className="text-lg font-semibold text-gray-900">Albums</h1>
         </div>
-        <button
-          onClick={() => { setShowForm((v) => !v); setCreateError(null); }}
-          className="rounded-lg bg-gray-900 px-3 py-1.5 text-sm text-white hover:bg-gray-700"
-        >
-          New album
-        </button>
+
+        <div className="flex items-center gap-3">
+          {/* Sort dropdown */}
+          <div ref={sortRef} className="relative">
+            <button
+              onClick={() => setSortOpen((v) => !v)}
+              className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-700 hover:border-gray-400 hover:bg-gray-50"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4 text-gray-400">
+                <path fillRule="evenodd" d="M2 3.75A.75.75 0 0 1 2.75 3h14.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 3.75Zm0 4.167a.75.75 0 0 1 .75-.75h9.5a.75.75 0 0 1 0 1.5h-9.5a.75.75 0 0 1-.75-.75Zm0 4.166a.75.75 0 0 1 .75-.75h5.5a.75.75 0 0 1 0 1.5h-5.5a.75.75 0 0 1-.75-.75Z" clipRule="evenodd" />
+              </svg>
+              {SORT_LABELS[sort]}
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4 text-gray-400">
+                <path fillRule="evenodd" d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" />
+              </svg>
+            </button>
+
+            {sortOpen && (
+              <div className="absolute right-0 top-full z-20 mt-1 w-48 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg">
+                {(["recent_photo", "last_modified", "title"] as AlbumSort[]).map((option) => (
+                  <button
+                    key={option}
+                    onClick={() => { setSort(option); setSortOpen(false); }}
+                    className={`flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm hover:bg-gray-50 ${
+                      sort === option ? "font-semibold text-gray-900" : "text-gray-700"
+                    }`}
+                  >
+                    {sort === option && (
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4 shrink-0 text-blue-600">
+                        <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z" clipRule="evenodd" />
+                      </svg>
+                    )}
+                    <span className={sort === option ? "" : "ml-6"}>{SORT_LABELS[option]}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Create album button */}
+          <button
+            onClick={() => { setShowForm((v) => !v); setCreateError(null); }}
+            className="flex items-center gap-1.5 rounded-lg bg-gray-900 px-3 py-1.5 text-sm text-white hover:bg-gray-700"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+              <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
+            </svg>
+            Create album
+          </button>
+        </div>
       </div>
 
       {/* New album form */}
@@ -141,12 +206,12 @@ export default function AlbumsPage() {
 
       {/* Albums grid */}
       {!loading && albums.length > 0 && (
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
           {albums.map((album) => (
             <div key={album.id} className="group relative">
               <Link href={`/albums/${album.id}`} className="block">
-                {/* Cover */}
-                <div className={`aspect-square overflow-hidden rounded-lg bg-gray-100 ${album.is_hidden ? "opacity-50" : ""}`}>
+                {/* Cover — 4:3 aspect ratio */}
+                <div className={`aspect-[4/3] overflow-hidden rounded-lg bg-gray-100 ${album.is_hidden ? "opacity-50" : ""}`}>
                   {album.cover_thumbnail_url ? (
                     <img
                       src={album.cover_thumbnail_url}
@@ -166,7 +231,7 @@ export default function AlbumsPage() {
                 <div className="mt-2">
                   <p className="truncate text-sm font-medium text-gray-900">{album.title}</p>
                   <p className="text-xs text-gray-400">
-                    {album.asset_count} {album.asset_count === 1 ? "photo" : "photos"}
+                    {album.asset_count} {album.asset_count === 1 ? "item" : "items"}
                     {album.is_hidden && <span className="ml-1.5 text-gray-300">· hidden from feed</span>}
                   </p>
                 </div>

@@ -436,8 +436,10 @@ export interface AlbumAssetItem {
   thumbnail_url: string | null;
 }
 
-export async function listAlbums(token: string): Promise<AlbumItem[]> {
-  const res = await fetch(`${CLIENT_API_URL}/albums`, {
+export type AlbumSort = "title" | "last_modified" | "recent_photo";
+
+export async function listAlbums(token: string, sort: AlbumSort = "title"): Promise<AlbumItem[]> {
+  const res = await fetch(`${CLIENT_API_URL}/albums?sort=${sort}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) {
