@@ -228,6 +228,7 @@ export default function AlbumDetailPage() {
   const gridRef = useRef<HTMLDivElement>(null);
 
   // Measure grid width for justified layout.
+  // Depends on `loading` so the observer re-attaches once the grid div is in the DOM.
   useLayoutEffect(() => {
     if (!gridRef.current) return;
     const ro = new ResizeObserver((entries) => {
@@ -236,7 +237,7 @@ export default function AlbumDetailPage() {
     });
     ro.observe(gridRef.current);
     return () => ro.disconnect();
-  }, []);
+  }, [loading]);
 
   useLayoutEffect(() => {
     if (ready && !token) router.replace("/login");
