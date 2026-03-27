@@ -388,7 +388,8 @@ async def _process(
                 # Collect media entries and build sidecar lookup by lowercase path
                 all_names = zf.namelist()
                 media_names = [n for n in all_names if _is_media_entry(n)]
-                sidecar_set = {n.lower() for n in all_names if n.lower().endswith(_SIDECAR_EXT)}
+                # Map lowercase entry name → actual entry name for O(1) case-insensitive lookup.
+                sidecar_map = {n.lower(): n for n in all_names if n.lower().endswith(_SIDECAR_EXT)}
 
                 # Pre-scan for album metadata.json and per-photo timestamps.
                 album_index = _build_album_index(zf)
@@ -400,7 +401,7 @@ async def _process(
 
                 for media_name in media_names:
                     await _ingest_one(
-                        session, job, owner_id, zf, media_name, sidecar_set, album_index
+                        session, job, owner_id, zf, media_name, sidecar_map, album_index
                     )
                     job.processed += 1
                     await session.commit()
@@ -418,13 +419,96 @@ async def _process(
         await session.commit()
 
 
+def _read_sidecar_from_path(file_path: Path) -> dict | None:
+    """Find and return the raw sidecar JSON dict for *file_path* on disk, or None.
+
+    Tries the standard '.json' name, the '.supplemental-metadata.json' variant,
+    and the live-photo companion (HEIC/HEIF/JPEG sidecar for an MP4/MOV).
+    """
+    _stem = PurePosixPath(file_path.name).stem
+    candidates: list[str] = [
+        _sidecar_name(file_path.name),
+        file_path.name + _SUPPLEMENTAL_SIDECAR_EXT,
+    ]
+    for _photo_ext in (".heic", ".heif", ".jpg", ".jpeg"):
+        candidates.append(_stem + _photo_ext + _SUPPLEMENTAL_SIDECAR_EXT)
+        candidates.append(_stem + _photo_ext + _SIDECAR_EXT)
+    for candidate_name in candidates:
+        candidate_path = file_path.parent / candidate_name
+        try:
+            return json.loads(candidate_path.read_text("utf-8", errors="replace"))
+        except FileNotFoundError:
+            continue
+        except Exception as exc:
+            logger.warning("Could not read sidecar %s: %s", candidate_path, exc)
+            break
+    return None
+
+
+def _read_sidecar(
+    media_name: str,
+    zf: zipfile.ZipFile,
+    sidecar_map: dict[str, str],
+) -> dict | None:
+    """Find and return the raw sidecar JSON dict for *media_name*, or None.
+
+    Tries the standard '.json' name, the '.supplemental-metadata.json' variant,
+    and the live-photo companion (HEIC/HEIF/JPEG sidecar for an MP4/MOV).
+    All comparisons are case-insensitive; *sidecar_map* maps lowercase→actual name.
+    """
+    _p = PurePosixPath(media_name)
+    _stem = _p.stem
+    _dir = str(_p.parent)
+    _dir_prefix = "" if _dir == "." else _dir + "/"
+    candidates: list[str] = [
+        _sidecar_name(media_name),
+        media_name + _SUPPLEMENTAL_SIDECAR_EXT,
+    ]
+    for _photo_ext in (".heic", ".heif", ".jpg", ".jpeg"):
+        _companion = _dir_prefix + _stem + _photo_ext
+        candidates.append(_companion + _SUPPLEMENTAL_SIDECAR_EXT)
+        candidates.append(_companion + _SIDECAR_EXT)
+    for candidate in candidates:
+        actual = sidecar_map.get(candidate.lower())
+        if actual is not None:
+            try:
+                raw_bytes = zf.read(actual)
+                if raw_bytes:
+                    return json.loads(raw_bytes.decode("utf-8", errors="replace"))
+            except Exception as exc:
+                logger.warning("Could not read sidecar %s: %s", actual, exc)
+            break
+    return None
+
+
+async def _fix_duplicate_date(
+    session: AsyncSession,
+    asset_id: uuid.UUID,
+    sidecar_data: dict | None,
+    context: str,
+) -> None:
+    """Update captured_at on an already-imported asset if the sidecar has a better date."""
+    if sidecar_data is None:
+        return
+    parsed = parse_sidecar(sidecar_data)
+    if parsed is None:
+        return
+    canonical = merge_metadata(None, parsed)
+    if canonical.captured_at is None:
+        return
+    asset = await session.get(MediaAsset, asset_id)
+    if asset is not None:
+        asset.captured_at = canonical.captured_at
+        logger.debug("Updated captured_at for duplicate %s from sidecar", context)
+
+
 async def _ingest_one(
     session: AsyncSession,
     job: ImportJob,
     owner_id: uuid.UUID,
     zf: zipfile.ZipFile,
     media_name: str,
-    sidecar_set: set[str],
+    sidecar_map: dict[str, str],
     album_index: _AlbumIndex | None = None,
 ) -> None:
     """Ingest a single media file from the zip.  Errors are caught and appended to job.errors."""
@@ -442,6 +526,7 @@ async def _ingest_one(
         )
     )
     if existing is not None:
+        await _fix_duplicate_date(session, existing, _read_sidecar(media_name, zf, sidecar_map), media_name)
         logger.debug("Skipping duplicate %s (checksum %s)", media_name, checksum)
         job.duplicates += 1
         return
@@ -492,40 +577,8 @@ async def _ingest_one(
             # EXIF extraction
             exif_result = extract_exif(data, mime)
 
-            # Sidecar lookup — try standard ".json" name, truncated variant, and the
-            # ".supplemental-metadata.json" variant used by some Takeout exports.
-            sidecar_data: dict | None = None
-            _p = PurePosixPath(media_name)
-            _stem = _p.stem
-            _dir = str(_p.parent)
-            _dir_prefix = "" if _dir == "." else _dir + "/"
-            _sidecar_candidates: list[str] = [
-                _sidecar_name(media_name),
-                _sidecar_name(Path(media_name).name),
-                media_name + _SUPPLEMENTAL_SIDECAR_EXT,
-                Path(media_name).name + _SUPPLEMENTAL_SIDECAR_EXT,
-            ]
-            # Live photo companion: iPhone MP4/MOV shares its stem with the HEIC/HEIF still.
-            # Try swapping the extension to find the photo's sidecar (e.g. IMG_4833.HEIC.json).
-            for _photo_ext in (".heic", ".heif", ".jpg", ".jpeg"):
-                _companion = _dir_prefix + _stem + _photo_ext
-                _sidecar_candidates.append(_companion + _SUPPLEMENTAL_SIDECAR_EXT)
-                _sidecar_candidates.append(_companion + _SIDECAR_EXT)
-            for candidate in _sidecar_candidates:
-                if candidate.lower() in sidecar_set:
-                    try:
-                        raw_bytes = zf.read(candidate) if candidate in zf.namelist() else None
-                        if raw_bytes is None:
-                            for real_name in zf.namelist():
-                                if real_name.lower() == candidate.lower():
-                                    raw_bytes = zf.read(real_name)
-                                    break
-                        if raw_bytes:
-                            sidecar_data = json.loads(raw_bytes.decode("utf-8", errors="replace"))
-                    except Exception as exc:
-                        logger.warning("Could not read sidecar %s: %s", candidate, exc)
-                    break
-
+            # Sidecar lookup
+            sidecar_data = _read_sidecar(media_name, zf, sidecar_map)
             parsed_sidecar = parse_sidecar(sidecar_data) if sidecar_data else None
             sidecar_found = parsed_sidecar is not None or sidecar_data is not None
 
@@ -537,15 +590,15 @@ async def _ingest_one(
             canonical = merge_metadata(exif_result, parsed_sidecar)
             if canonical.captured_at is not None:
                 captured = canonical.captured_at
-                # No sidecar: try to correct a wrong camera-clock year using the
-                # "Photos from YYYY" folder name (Google Takeout convention).
-                if not sidecar_found:
-                    year = _folder_year(media_name)
-                    if year and year != captured.year:
-                        try:
-                            captured = captured.replace(year=year)
-                        except ValueError:
-                            pass  # e.g. Feb 29 in a non-leap year — keep original
+                # Correct a wrong year using the "Photos from YYYY" folder name
+                # (Google Takeout convention). Applied regardless of sidecar presence
+                # because Google controls these folder names and they are reliable.
+                year = _folder_year(media_name)
+                if year and year != captured.year:
+                    try:
+                        captured = captured.replace(year=year)
+                    except ValueError:
+                        pass  # e.g. Feb 29 in a non-leap year — keep original
                 asset.captured_at = captured
             elif not sidecar_found:
                 # Neither sidecar nor EXIF provided a date — fall back to the
@@ -754,6 +807,7 @@ async def _ingest_one_from_path(
         )
     )
     if existing is not None:
+        await _fix_duplicate_date(session, existing, _read_sidecar_from_path(file_path), file_path.name)
         logger.debug("Skipping duplicate %s (checksum %s)", file_path.name, checksum)
         job.duplicates += 1
         return
@@ -800,30 +854,8 @@ async def _ingest_one_from_path(
 
             exif_result = extract_exif(data, mime)
 
-            # Sidecar: look for {filename}.json (or .supplemental-metadata.json) adjacent
-            # to the media file. Try standard and supplemental-metadata naming variants.
-            sidecar_data: dict | None = None
-            _fname_stem = PurePosixPath(file_path.name).stem
-            _sidecar_candidates_path: list[str] = [
-                _sidecar_name(file_path.name),
-                _sidecar_name(PurePosixPath(file_path.name).name),
-                file_path.name + _SUPPLEMENTAL_SIDECAR_EXT,
-                PurePosixPath(file_path.name).name + _SUPPLEMENTAL_SIDECAR_EXT,
-            ]
-            # Live photo companion: iPhone MP4/MOV shares its stem with the HEIC/HEIF still.
-            for _photo_ext in (".heic", ".heif", ".jpg", ".jpeg"):
-                _companion_name = _fname_stem + _photo_ext
-                _sidecar_candidates_path.append(_companion_name + _SUPPLEMENTAL_SIDECAR_EXT)
-                _sidecar_candidates_path.append(_companion_name + _SIDECAR_EXT)
-            for candidate_name in _sidecar_candidates_path:
-                candidate_path = file_path.parent / candidate_name
-                if candidate_path.exists():
-                    try:
-                        sidecar_data = json.loads(candidate_path.read_text("utf-8", errors="replace"))
-                    except Exception as exc:
-                        logger.warning("Could not read sidecar %s: %s", candidate_path, exc)
-                    break
-
+            # Sidecar lookup (standard, supplemental-metadata, live-photo companion).
+            sidecar_data = _read_sidecar_from_path(file_path)
             parsed_sidecar = parse_sidecar(sidecar_data) if sidecar_data else None
             sidecar_found = parsed_sidecar is not None or sidecar_data is not None
 
@@ -834,15 +866,15 @@ async def _ingest_one_from_path(
             canonical = merge_metadata(exif_result, parsed_sidecar)
             if canonical.captured_at is not None:
                 captured = canonical.captured_at
-                # No sidecar: try to correct a wrong camera-clock year using the
-                # "Photos from YYYY" folder name (Google Takeout convention).
-                if not sidecar_found:
-                    year = _folder_year(str(file_path))
-                    if year and year != captured.year:
-                        try:
-                            captured = captured.replace(year=year)
-                        except ValueError:
-                            pass  # e.g. Feb 29 in a non-leap year — keep original
+                # Correct a wrong year using the "Photos from YYYY" folder name
+                # (Google Takeout convention). Applied regardless of sidecar presence
+                # because Google controls these folder names and they are reliable.
+                year = _folder_year(str(file_path))
+                if year and year != captured.year:
+                    try:
+                        captured = captured.replace(year=year)
+                    except ValueError:
+                        pass  # e.g. Feb 29 in a non-leap year — keep original
                 asset.captured_at = captured
             elif not sidecar_found:
                 asset.captured_at = _mtime_from_path(file_path)

@@ -321,14 +321,17 @@ export default function Home() {
   }, [ready, token, router]);
 
   // Measure container width for justified layout.
+  // Depends on ready+token because the grid div only mounts after auth resolves
+  // (the component returns null before that), so the effect must re-run then.
   useLayoutEffect(() => {
     if (!gridRef.current) return;
+    setContainerWidth(Math.floor(gridRef.current.getBoundingClientRect().width));
     const obs = new ResizeObserver(([entry]) => {
       setContainerWidth(Math.floor(entry.contentRect.width));
     });
     obs.observe(gridRef.current);
     return () => obs.disconnect();
-  }, []);
+  }, [ready, token]);
 
   // Scroll restoration — runs once after first batch renders.
   useEffect(() => {
