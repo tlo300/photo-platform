@@ -46,6 +46,7 @@ from app.services.storage import StorageError, storage_service
 from app.services.takeout_sidecar import ParsedSidecar, parse_sidecar
 from app.services.upload_validation import ALLOWED_MIME_TYPES
 from app.worker.celery_app import celery_app
+from app.worker.takeout_tasks import _LIVE_STILL_EXTS, _LIVE_VIDEO_EXTS
 
 logger = logging.getLogger(__name__)
 
@@ -191,6 +192,9 @@ async def _ingest_one(
     rel_path: str,
     target_album_id: uuid.UUID | None,
     parsed_sidecar: ParsedSidecar | None = None,
+    live_video_data: bytes | None = None,
+    live_video_suffix: str | None = None,
+    live_video_mime: str | None = None,
 ) -> None:
     """Ingest a single media file from raw bytes.  Errors are caught and appended to job.errors."""
     checksum = _sha256(data)
@@ -226,6 +230,7 @@ async def _ingest_one(
         return
 
     staged_key: str | None = None
+    staged_live_key: str | None = None
     try:
         async with session.begin_nested():
             mime = _detect_mime(data, filename)
@@ -262,6 +267,21 @@ async def _ingest_one(
                 {"delta": len(data), "uid": owner_id},
             )
             await session.flush()
+
+            # Live Photo pairing — attach companion video if bytes were provided
+            if live_video_data:
+                staged_live_key = storage_service.upload_live_video(
+                    str(owner_id), str(asset_id), io.BytesIO(live_video_data),
+                    live_video_suffix, live_video_mime,
+                )
+                asset.is_live_photo = True
+                asset.live_video_key = staged_live_key
+                await session.execute(
+                    text(
+                        "UPDATE users SET storage_used_bytes = storage_used_bytes + :delta WHERE id = :uid"
+                    ),
+                    {"delta": len(live_video_data), "uid": owner_id},
+                )
 
             # Resolve captured_at via the canonical merge strategy (same as Takeout path).
             # parsed_sidecar is populated when a matching .json sidecar was uploaded
@@ -314,6 +334,9 @@ async def _ingest_one(
         if staged_key is not None:
             with contextlib.suppress(StorageError):
                 storage_service.delete(staged_key)
+        if staged_live_key is not None:
+            with contextlib.suppress(StorageError):
+                storage_service.delete(staged_live_key)
         errors = list(job.errors or [])
         errors.append({"filename": filename, "reason": str(exc)})
         job.errors = errors
@@ -374,6 +397,19 @@ async def _run_direct_upload(job_id: uuid.UUID, owner_id: uuid.UUID) -> None:
                     with contextlib.suppress(StorageError):
                         storage_service.delete(key)
 
+            # Build Live Photo pairing map: stem_lower → {"still": entry, "video": entry}
+            _lp_candidates: dict[str, dict[str, dict]] = {}
+            for _entry in media_entries:
+                _fn = _entry["filename"]
+                _ext = PurePosixPath(_fn).suffix.lower()
+                _stem = PurePosixPath(_fn).stem.lower()
+                if _ext in _LIVE_STILL_EXTS:
+                    _lp_candidates.setdefault(_stem, {})["still"] = _entry
+                elif _ext in _LIVE_VIDEO_EXTS:
+                    _lp_candidates.setdefault(_stem, {})["video"] = _entry
+            live_pairs_upload = {k: v for k, v in _lp_candidates.items() if "still" in v and "video" in v}
+            paired_video_filenames = {v["video"]["filename"] for v in live_pairs_upload.values()}
+
             job.total = len(media_entries)
             job.status = ImportJobStatus.processing
             await session.commit()
@@ -382,8 +418,11 @@ async def _run_direct_upload(job_id: uuid.UUID, owner_id: uuid.UUID) -> None:
             )
 
             for entry in media_entries:
-                key = entry["key"]
                 filename = entry.get("filename", "upload")
+                if filename in paired_video_filenames:
+                    continue  # companion video — will be attached to its still
+
+                key = entry["key"]
                 rel_path: str = entry.get("rel_path", "")
 
                 parsed_sidecar = sidecar_lookup.get(filename.lower())
@@ -414,9 +453,39 @@ async def _run_direct_upload(job_id: uuid.UUID, owner_id: uuid.UUID) -> None:
                     )
                     continue
 
+                # Live Photo pairing — download companion video bytes if paired
+                _stem = PurePosixPath(filename).stem.lower()
+                _live_video_data: bytes | None = None
+                _live_video_suffix: str | None = None
+                _live_video_mime: str | None = None
+                _live_video_key: str | None = None
+
+                if _stem in live_pairs_upload:
+                    _video_entry = live_pairs_upload[_stem]["video"]
+                    _live_video_key = _video_entry["key"]
+                    _live_video_suffix = PurePosixPath(_video_entry["filename"]).suffix.lower()
+                    _live_video_mime = (
+                        "video/mp4" if _live_video_suffix == ".mp4" else "video/quicktime"
+                    )
+                    try:
+                        _vid_buf = io.BytesIO()
+                        storage_service._client.download_fileobj(
+                            storage_service._bucket, _live_video_key, _vid_buf
+                        )
+                        _live_video_data = _vid_buf.getvalue()
+                    except ClientError as exc:
+                        logger.warning(
+                            "Could not download Live Photo video %s: %s", _live_video_key, exc
+                        )
+                        _live_video_data = None
+                        _live_video_key = None
+
                 await _ingest_one(
                     session, job, owner_id, data, filename, rel_path, target_album_id,
                     parsed_sidecar=parsed_sidecar,
+                    live_video_data=_live_video_data,
+                    live_video_suffix=_live_video_suffix,
+                    live_video_mime=_live_video_mime,
                 )
                 job.processed += 1
                 await session.commit()
@@ -427,6 +496,11 @@ async def _run_direct_upload(job_id: uuid.UUID, owner_id: uuid.UUID) -> None:
                 # Delete staging key regardless of ingest outcome
                 with contextlib.suppress(StorageError):
                     storage_service.delete(key)
+
+                # Delete the companion video staging key (already processed or skipped)
+                if _live_video_key is not None:
+                    with contextlib.suppress(StorageError):
+                        storage_service.delete(_live_video_key)
 
             # Retroactive date fix: for sidecars whose photo was not re-uploaded
             # (dedup-filtered on the client), update captured_at of existing assets.

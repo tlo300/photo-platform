@@ -387,6 +387,30 @@ def _build_live_photo_pairs(
     }
 
 
+def _build_live_photo_pairs_fs(
+    media_paths: list[Path],
+) -> tuple[dict[tuple[str, str], dict[str, Path]], set[Path]]:
+    """Pre-scan *media_paths* and return a map of Live Photo still+video pairs.
+
+    Returns ``(pairs_dict, paired_video_paths_set)`` where *pairs_dict* is keyed
+    by ``(dir_str, stem_lower)`` and each value has ``"still"`` and ``"video"``
+    Path entries.  *paired_video_paths_set* contains the Path objects for every
+    video side so the caller can skip them in the main loop.
+    """
+    candidates: dict[tuple[str, str], dict[str, Path]] = {}
+    for p in media_paths:
+        ext_lower = p.suffix.lower()
+        dir_str = str(p.parent)
+        stem_lower = p.stem.lower()
+        if ext_lower in _LIVE_STILL_EXTS:
+            candidates.setdefault((dir_str, stem_lower), {})["still"] = p
+        elif ext_lower in _LIVE_VIDEO_EXTS:
+            candidates.setdefault((dir_str, stem_lower), {})["video"] = p
+    pairs = {k: v for k, v in candidates.items() if "still" in v and "video" in v}
+    paired_videos = {v["video"] for v in pairs.values()}
+    return pairs, paired_videos
+
+
 # ---------------------------------------------------------------------------
 # Async core — called from the sync Celery task via asyncio.run()
 # ---------------------------------------------------------------------------
@@ -872,13 +896,20 @@ async def _process_folder(
     try:
         media_paths = sorted(p for p in folder.rglob("*") if p.is_file() and _is_media_path(p))
 
+        # Pre-scan for HEIC+MP4/MOV Live Photo pairs sharing the same stem/dir.
+        live_pairs_fs, paired_video_paths = _build_live_photo_pairs_fs(media_paths)
+
         job.total = len(media_paths)
         job.status = ImportJobStatus.processing
         await session.commit()
         await _set_rls(session, owner_id)
 
         for media_path in media_paths:
-            await _ingest_one_from_path(session, job, owner_id, media_path, folder)
+            await _ingest_one_from_path(
+                session, job, owner_id, media_path, folder,
+                live_pairs_fs=live_pairs_fs,
+                paired_video_paths=paired_video_paths,
+            )
             job.processed += 1
             await session.commit()
             await _set_rls(session, owner_id)
@@ -901,10 +932,16 @@ async def _ingest_one_from_path(
     owner_id: uuid.UUID,
     file_path: Path,
     import_root: Path,
+    *,
+    live_pairs_fs: dict | None = None,
+    paired_video_paths: set | None = None,
 ) -> None:
     """Ingest a single media file from the filesystem. Errors are caught and appended to job.errors."""
     import contextlib
     from app.services.storage import StorageError
+
+    if paired_video_paths and file_path in paired_video_paths:
+        return  # companion video — will be ingested alongside its HEIC still
 
     data = file_path.read_bytes()
     checksum = _sha256_bytes(data)
@@ -922,6 +959,7 @@ async def _ingest_one_from_path(
         return
 
     staged_key: str | None = None
+    staged_live_key: str | None = None
     try:
         async with session.begin_nested():
             mime = _mime_from_magic(data)
@@ -960,6 +998,30 @@ async def _ingest_one_from_path(
                 {"delta": len(data), "uid": owner_id},
             )
             await session.flush()
+
+            # Live Photo pairing — attach companion video if present
+            if live_pairs_fs:
+                _pair_key = (str(file_path.parent), file_path.stem.lower())
+                _pair_sides = live_pairs_fs.get(_pair_key)
+                if _pair_sides and "video" in _pair_sides:
+                    _video_path: Path = _pair_sides["video"]
+                    _video_suffix = _video_path.suffix.lower()
+                    _video_mime = "video/mp4" if _video_suffix == ".mp4" else "video/quicktime"
+                    _video_data = _video_path.read_bytes()
+                    staged_live_key = storage_service.upload_live_video(
+                        str(owner_id), str(asset_id), io.BytesIO(_video_data), _video_suffix, _video_mime
+                    )
+                    asset.is_live_photo = True
+                    asset.live_video_key = staged_live_key
+                    await session.execute(
+                        text(
+                            "UPDATE users SET storage_used_bytes = storage_used_bytes + :delta WHERE id = :uid"
+                        ),
+                        {"delta": len(_video_data), "uid": owner_id},
+                    )
+                    logger.info(
+                        "Live Photo pair: still=%s video=%s", file_path.name, _video_path.name
+                    )
 
             exif_result = extract_exif(data, mime)
 
@@ -1021,6 +1083,9 @@ async def _ingest_one_from_path(
         if staged_key is not None:
             with contextlib.suppress(StorageError):
                 storage_service.delete(staged_key)
+        if staged_live_key is not None:
+            with contextlib.suppress(StorageError):
+                storage_service.delete(staged_live_key)
         errors = list(job.errors or [])
         errors.append({"filename": file_path.name, "reason": str(exc)})
         job.errors = errors
