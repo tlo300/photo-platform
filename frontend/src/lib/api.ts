@@ -321,6 +321,7 @@ export interface AssetItem {
   width: number | null;
   height: number | null;
   locality: string | null;
+  is_live_photo: boolean;
 }
 
 export interface AssetsPage {
@@ -380,6 +381,8 @@ export interface AssetDetail {
   description: string | null;
   full_url: string;
   thumbnail_url: string | null;
+  is_live_photo: boolean;
+  live_video_url: string | null;
   metadata: AssetMetadata | null;
   location: AssetLocation | null;
   tags: AssetTagItem[];
