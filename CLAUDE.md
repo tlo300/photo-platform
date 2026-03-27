@@ -79,10 +79,32 @@ Update this section at the end of every working session.
 
 ```
 Active milestone : Extra Requirements
-Last completed  : hotfixes 2026-03-26 (retroactive SQL fix, upload cache clear button, photo feed fix)
+Last completed  : 2026-03-27 live photo backfill — 1,914 pairs merged (PR #136); direct-upload pairing (PR #135)
 In progress     : (none)
 Blocked         : (none)
 ```
+
+### Handoff — 2026-03-27 (Live photo pairing for folder/direct upload)
+**Completed:**
+- `upload_tasks.py`: added `_LIVE_STILL_EXTS` / `_LIVE_VIDEO_EXTS` constants
+- `_run_direct_upload`: pre-scans media entries for `(parent_dir_lower, stem_lower)` pairs; companion videos skipped as standalone; `job.total` excludes companion count
+- `_ingest_one`: accepts `live_video_data` + `live_video_filename`; calls `upload_live_video`, sets `is_live_photo=True` + `live_video_key`, includes video bytes in storage delta, cleans up `staged_live_key` on failure
+- **NOT committed yet** — local changes only
+
+**Why re-import won't fix pre-existing pairs:**
+The checksum dedup check fires before any pairing logic, so already-imported HEIC/MP4 pairs show as duplicates on re-upload and are skipped.
+
+**Next step:** `POST /admin/backfill-live-photos` endpoint + `live_photo.backfill_pairs` Celery task in `metadata_tasks.py`.
+
+Backfill design:
+- Match HEIC/HEIF/JPG assets (`is_live_photo=false`) with MP4/MOV by `(stem_lower, parent_dir_lower)` of `original_filename`
+- S3 copy_object: `{user_id}/{mp4_id}/original.ext` → `{user_id}/{heic_id}/live.ext`; then delete old key + old MP4 DB row
+- Do NOT change `storage_used_bytes` (bytes unchanged — just moved)
+- Idempotent; optional `?user_id=` filter; same response shape as `/admin/backfill-metadata`
+
+**Gotchas:**
+- Folder import shows "files skipped" for already-uploaded files — expected, dedup by checksum. Live pairing only fires for first-time ingestion.
+- `paired_video_staging_keys` uses the S3 staging key (not filename) as the skip identifier — correct because filenames may not be unique.
 
 ### Handoff — 2026-03-26 (Hotfixes: SQL date fix, upload cache clear, photo feed fix)
 **Completed:**
@@ -411,6 +433,9 @@ Update the status column as issues progress.
 | #30   | Production Docker Compose config         | 6         | pr-open |
 | #31   | S3-compatible storage abstraction        | 6         | backlog |
 | #32   | Deployment runbook                       | 6         | backlog |
+
+## Agent strategy
+Always delegate sub-tasks (exploration, research, multi-step analysis) to subagents via the `Agent` tool to keep the main context window lean. Run independent sub-tasks in parallel. Surface only key findings in the main conversation, not raw tool output.
 
 ## Starting a new session
 From the project root in PowerShell:
