@@ -453,7 +453,7 @@ async def list_album_assets(
                 AlbumAsset.sort_order,
                 MediaMetadata.width_px,
                 MediaMetadata.height_px,
-                Location.locality,
+                Location.display_name.label("locality"),
             )
             .join(AlbumAsset, AlbumAsset.asset_id == MediaAsset.id)
             .outerjoin(MediaMetadata, MediaMetadata.asset_id == MediaAsset.id)
