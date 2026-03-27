@@ -64,6 +64,10 @@ def _folder_year(path: str) -> int | None:
 
 # Sidecar extension used by Google Takeout
 _SIDECAR_EXT = ".json"
+
+# Extensions used to identify Live Photo stills (primary) and companion videos.
+_LIVE_STILL_EXTS = frozenset({".heic", ".heif", ".jpg", ".jpeg"})
+_LIVE_VIDEO_EXTS = frozenset({".mp4", ".mov"})
 # Older / region-specific Takeout exports use this suffix instead of ".json".
 _SUPPLEMENTAL_SIDECAR_EXT = ".supplemental-metadata.json"
 
@@ -345,6 +349,45 @@ async def _link_asset_to_album(
 
 
 # ---------------------------------------------------------------------------
+# Live Photo pairing helpers
+# ---------------------------------------------------------------------------
+
+
+def _build_live_photo_pairs(
+    all_names: list[str],
+) -> dict[tuple[str, str], dict[str, zipfile.ZipInfo]]:
+    """Pre-scan *all_names* and return a map of Live Photo still+video pairs.
+
+    Returns a dict keyed by ``(dir_prefix, stem_lower)`` where each value is a
+    sub-dict with one or both of ``"still"`` and ``"video"`` keys holding the
+    raw zip entry name.  Only entries that have **both** a still and a video are
+    considered Live Photo pairs; entries with only one side are ignored during
+    pairing (they will be processed normally by ``_ingest_one``).
+    """
+    # Two-pass: first collect all stills/videos keyed by (dir, stem_lower).
+    candidates: dict[tuple[str, str], dict[str, str]] = {}
+
+    for name in all_names:
+        p = PurePosixPath(name)
+        ext_lower = p.suffix.lower()
+        dir_str = str(p.parent)
+        dir_prefix = "" if dir_str == "." else dir_str
+        stem_lower = p.stem.lower()
+
+        if ext_lower in _LIVE_STILL_EXTS:
+            candidates.setdefault((dir_prefix, stem_lower), {})["still"] = name
+        elif ext_lower in _LIVE_VIDEO_EXTS:
+            candidates.setdefault((dir_prefix, stem_lower), {})["video"] = name
+
+    # Keep only entries that have both sides.
+    return {
+        key: sides
+        for key, sides in candidates.items()
+        if "still" in sides and "video" in sides
+    }
+
+
+# ---------------------------------------------------------------------------
 # Async core — called from the sync Celery task via asyncio.run()
 # ---------------------------------------------------------------------------
 
@@ -394,6 +437,15 @@ async def _process(
                 # Pre-scan for album metadata.json and per-photo timestamps.
                 album_index = _build_album_index(zf)
 
+                # Pre-scan for HEIC+MP4/MOV Live Photo pairs sharing the same stem/dir.
+                live_photo_pairs = _build_live_photo_pairs(all_names)
+
+                # Build a set of companion video names for fast O(1) lookup so that
+                # _ingest_one can skip them when they belong to a Live Photo pair.
+                paired_video_names: set[str] = {
+                    sides["video"] for sides in live_photo_pairs.values()
+                }
+
                 job.total = len(media_names)
                 job.status = ImportJobStatus.processing
                 await session.commit()
@@ -401,7 +453,9 @@ async def _process(
 
                 for media_name in media_names:
                     await _ingest_one(
-                        session, job, owner_id, zf, media_name, sidecar_map, album_index
+                        session, job, owner_id, zf, media_name, sidecar_map, album_index,
+                        live_photo_pairs=live_photo_pairs,
+                        paired_video_names=paired_video_names,
                     )
                     job.processed += 1
                     await session.commit()
@@ -510,10 +564,28 @@ async def _ingest_one(
     media_name: str,
     sidecar_map: dict[str, str],
     album_index: _AlbumIndex | None = None,
+    *,
+    live_photo_pairs: dict[tuple[str, str], dict[str, str]] | None = None,
+    paired_video_names: set[str] | None = None,
 ) -> None:
-    """Ingest a single media file from the zip.  Errors are caught and appended to job.errors."""
+    """Ingest a single media file from the zip.  Errors are caught and appended to job.errors.
+
+    When *live_photo_pairs* and *paired_video_names* are provided (zip import path only):
+      - Video files that are companions in a Live Photo pair are skipped here; they
+        are ingested as part of the matching still file's processing.
+      - Still files (HEIC/JPG) that have a matching companion video are ingested as a
+        single Live Photo asset (one DB row, two S3 objects).
+    """
     import contextlib
     from app.services.storage import StorageError
+
+    # --- Live Photo companion video: skip — ingested as part of the still ---
+    if paired_video_names and media_name in paired_video_names:
+        logger.debug(
+            "Skipping companion video %s — will be ingested with its Live Photo still",
+            media_name,
+        )
+        return
 
     data = zf.read(media_name)
     checksum = _sha256_bytes(data)
@@ -532,6 +604,7 @@ async def _ingest_one(
         return
 
     staged_key: str | None = None
+    staged_live_key: str | None = None
     try:
         async with session.begin_nested():
             # All DB writes are inside a savepoint — on failure the savepoint is
@@ -552,6 +625,35 @@ async def _ingest_one(
                 mime,
             )
 
+            # --- Live Photo companion video upload ---
+            # Check if this still has a paired companion video in the same dir.
+            live_video_size: int = 0
+            _p = PurePosixPath(media_name)
+            _dir_str = str(_p.parent)
+            _dir_prefix = "" if _dir_str == "." else _dir_str
+            _stem_lower = _p.stem.lower()
+            _pair_key = (_dir_prefix, _stem_lower)
+            _pair_sides = (live_photo_pairs or {}).get(_pair_key)
+            if _pair_sides and "video" in _pair_sides:
+                video_entry_name = _pair_sides["video"]
+                video_zi = zf.getinfo(video_entry_name)
+                live_video_size = video_zi.file_size
+                live_video_suffix = Path(video_entry_name).suffix.lower()
+                live_video_mime = (
+                    "video/mp4" if live_video_suffix == ".mp4" else "video/quicktime"
+                )
+                with zf.open(video_entry_name) as _vid_obj:
+                    staged_live_key = storage_service.upload_live_video(
+                        str(owner_id),
+                        str(asset_id),
+                        _vid_obj,
+                        live_video_suffix,
+                        live_video_mime,
+                    )
+                logger.info(
+                    "Live Photo pair: still=%s video=%s", media_name, video_entry_name
+                )
+
             from app.models.media import MediaAsset as _MA
 
             asset = _MA(
@@ -563,14 +665,18 @@ async def _ingest_one(
                 storage_key=staged_key,
                 checksum=checksum,
             )
+            if staged_live_key is not None:
+                asset.is_live_photo = True
+                asset.live_video_key = staged_live_key
             session.add(asset)
+            total_bytes = len(data) + live_video_size
             await session.execute(
                 text(
                     "UPDATE users"
                     " SET storage_used_bytes = storage_used_bytes + :delta"
                     " WHERE id = :uid"
                 ),
-                {"delta": len(data), "uid": owner_id},
+                {"delta": total_bytes, "uid": owner_id},
             )
             await session.flush()
 
@@ -643,10 +749,13 @@ async def _ingest_one(
 
     except Exception as exc:
         logger.warning("Failed to ingest %s: %s", media_name, exc)
-        # Clean up the staged S3 object if it was uploaded before the DB write failed
+        # Clean up staged S3 objects if they were uploaded before the DB write failed
         if staged_key is not None:
             with contextlib.suppress(StorageError):
                 storage_service.delete(staged_key)
+        if staged_live_key is not None:
+            with contextlib.suppress(StorageError):
+                storage_service.delete(staged_live_key)
         errors = list(job.errors or [])
         errors.append({"filename": Path(media_name).name, "reason": str(exc)})
         job.errors = errors
