@@ -79,10 +79,27 @@ Update this section at the end of every working session.
 
 ```
 Active milestone : Extra Requirements
-Last completed  : 2026-03-27 album detail feed look + day grouping + Live Photo (PR #141)
+Last completed  : 2026-03-28 timeline scrubber year jump (PR #143)
 In progress     : (none)
 Blocked         : (none)
 ```
+
+### Handoff — 2026-03-28 (#130 Timeline scrubber year jump — PR #143)
+**Completed:**
+- `backend/app/api/assets.py`: new `GET /assets/years` endpoint — returns distinct years with photos, RLS-scoped, newest first
+- `frontend/src/lib/api.ts`: `getAssetYears()` function; `getAssets()` gains optional `dateTo` param (maps to `date_to` query param)
+- `frontend/src/app/page.tsx`:
+  - Fetches all years on mount and drives scrubber from API list — all years visible immediately, not just loaded ones
+  - Scrubber selectors use `[data-date^="YEAR-"]` CSS starts-with attribute match
+  - Scroll listener effect depends on `[ready, token]` so it attaches after auth resolves (previously fired before div mounted)
+  - Year click: if section in DOM → `scrollBy` to it; if not loaded yet → fetch `GET /assets?date_to=YEAR+1-01-01` to reset feed to that year, then scroll to top
+  - Active year set on first items load, then tracked on scroll via `getBoundingClientRect`
+
+**Gotchas:**
+- `ready` starts `false` (auth context does async refresh); any `useEffect` that attaches to `scrollRef` must include `ready` and `token` in deps — same pattern as the `useLayoutEffect` for `gridRef`
+- `scrollIntoView` targets the window, not the custom `overflow-y-auto` container — use `el.scrollBy()` or `el.scrollTop =` directly on `scrollRef.current`
+- `offsetTop` is relative to `offsetParent` (nearest positioned ancestor), NOT the scroll container unless it has `position: relative` — use `getBoundingClientRect` relative to `el` instead
+- `date_to` for year jump uses `${year + 1}-01-01T00:00:00Z` (start of next year) to get photos from that year and earlier, newest first
 
 ### Handoff — 2026-03-27 (Album detail feed look + day grouping + Live Photo — PR #141)
 **Completed:**
