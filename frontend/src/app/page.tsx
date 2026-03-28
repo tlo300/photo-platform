@@ -456,8 +456,12 @@ export default function Home() {
   }));
 
   const handleYearClick = (selector: string) => {
-    const target = scrollRef.current?.querySelector<HTMLElement>(selector);
-    target?.scrollIntoView({ behavior: "smooth", block: "start" });
+    const el = scrollRef.current;
+    if (!el) return;
+    const target = el.querySelector<HTMLElement>(selector);
+    if (!target) return;
+    const dy = target.getBoundingClientRect().top - el.getBoundingClientRect().top - 8;
+    el.scrollBy({ top: dy, behavior: "smooth" });
   };
 
   return (
