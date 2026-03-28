@@ -332,10 +332,12 @@ export interface AssetsPage {
 export async function getAssets(
   token: string,
   cursor?: string,
-  limit = 50
+  limit = 50,
+  dateTo?: string,
 ): Promise<AssetsPage> {
   const params = new URLSearchParams({ limit: String(limit) });
   if (cursor) params.set("cursor", cursor);
+  if (dateTo) params.set("date_to", dateTo);
   const res = await fetch(`${CLIENT_API_URL}/assets?${params}`, {
     headers: { Authorization: `Bearer ${token}` },
   });

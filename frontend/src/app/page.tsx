@@ -253,7 +253,7 @@ function TimelineScrubber({
 }: {
   years: YearEntry[];
   activeYear: number | null;
-  onYearClick: (selector: string) => void;
+  onYearClick: (selector: string, year: number) => void;
 }) {
   if (years.length === 0) return null;
   return (
@@ -261,7 +261,7 @@ function TimelineScrubber({
       {years.map(({ year, selector }) => (
         <button
           key={year}
-          onClick={() => onYearClick(selector)}
+          onClick={() => onYearClick(selector, year)}
           className={`text-xs leading-none transition-colors ${
             activeYear === year
               ? "font-semibold text-gray-900"
@@ -455,13 +455,30 @@ export default function Home() {
     selector: `[data-date^="${year}-"]`,
   }));
 
-  const handleYearClick = (selector: string) => {
+  const handleYearClick = async (selector: string, year: number) => {
     const el = scrollRef.current;
     if (!el) return;
     const target = el.querySelector<HTMLElement>(selector);
-    if (!target) return;
-    const dy = target.getBoundingClientRect().top - el.getBoundingClientRect().top - 8;
-    el.scrollBy({ top: dy, behavior: "smooth" });
+    if (target) {
+      // Year already in DOM — scroll to it.
+      const dy = target.getBoundingClientRect().top - el.getBoundingClientRect().top - 8;
+      el.scrollBy({ top: dy, behavior: "smooth" });
+      return;
+    }
+    // Year not loaded yet — reset feed starting from the end of that year.
+    if (!token) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const page = await getAssets(token, undefined, 50, `${year + 1}-01-01T00:00:00Z`);
+      setItems(page.items);
+      setNextCursor(page.next_cursor);
+      el.scrollTop = 0;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load photos");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
