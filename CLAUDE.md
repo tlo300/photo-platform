@@ -79,10 +79,22 @@ Update this section at the end of every working session.
 
 ```
 Active milestone : Extra Requirements
-Last completed  : 2026-03-28 timeline scrubber year jump (PR #143)
+Last completed  : 2026-03-28 prev/next navigation buttons on asset detail (PR #145)
 In progress     : (none)
 Blocked         : (none)
 ```
+
+### Handoff — 2026-03-28 (#129 Prev/Next navigation — PR #145)
+**Completed:**
+- `backend/app/api/assets.py`: new `GET /assets/{id}/adjacent` endpoint — returns `{ prev_id, next_id }` (both nullable UUIDs); uses same `captured_at DESC NULLS LAST, id DESC` ordering as the timeline; handles `NULL captured_at` with correct prev/next filter logic; RLS-scoped + explicit `owner_id` defence-in-depth
+- `frontend/src/lib/api.ts`: `getAdjacentAssets()` + `AdjacentAssets` interface
+- `frontend/src/app/assets/[id]/page.tsx`: `adjacent` state fetched alongside the asset; left/right chevron buttons in top bar; disabled + 30% opacity at the ends of the library; navigation via `router.push` (not `router.back`)
+- 5 new integration tests in `test_asset_detail.py`: middle, first, last, RLS isolation, 401
+
+**Gotchas:**
+- Pre-existing `test_live_photo_asset_returns_live_video_url` failure in `test_asset_detail.py` is a module-scope user ordering issue, not caused by this PR. Same class of flakiness as `test_backfill_asset_retries_on_storage_error`.
+- The adjacent tests use a dedicated fresh user per test run (via inline registration in the fixture) — this avoids interference from other assets inserted by `test_data` and `live_photo_data` fixtures that share the same user.
+- Route `GET /assets/{id}/adjacent` declared after `GET /assets/{id}/albums` — both have distinct path suffixes, no FastAPI ordering conflict.
 
 ### Handoff — 2026-03-28 (#130 Timeline scrubber year jump — PR #143)
 **Completed:**
