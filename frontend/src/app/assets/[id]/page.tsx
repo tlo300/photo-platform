@@ -6,7 +6,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
-import { getAsset, listAlbums, addAssetsToAlbum, getAssetAlbums, AssetDetail, AlbumItem, AssetAlbumItem } from "@/lib/api";
+import { getAsset, getAdjacentAssets, listAlbums, addAssetsToAlbum, getAssetAlbums, AssetDetail, AdjacentAssets, AlbumItem, AssetAlbumItem } from "@/lib/api";
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -38,6 +38,7 @@ export default function AssetDetailPage() {
   const [asset, setAsset] = useState<AssetDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [adjacent, setAdjacent] = useState<AdjacentAssets>({ prev_id: null, next_id: null });
 
   // Albums
   const [albums, setAlbums] = useState<AlbumItem[]>([]);
@@ -57,10 +58,12 @@ export default function AssetDetailPage() {
   useEffect(() => {
     if (!ready || !token || !id) return;
     setLoading(true);
+    setAdjacent({ prev_id: null, next_id: null });
     getAsset(token, id)
       .then(setAsset)
       .catch((e) => setError(e instanceof Error ? e.message : "Failed to load asset"))
       .finally(() => setLoading(false));
+    getAdjacentAssets(token, id).then(setAdjacent).catch(() => {/* non-critical */});
   }, [ready, token, id]);
 
   useEffect(() => {
@@ -164,7 +167,30 @@ export default function AssetDetailPage() {
           </svg>
           Back
         </button>
-        <span className="truncate text-sm text-gray-500">{asset.original_filename}</span>
+        <span className="flex-1 truncate text-sm text-gray-500">{asset.original_filename}</span>
+        {/* Prev / Next navigation */}
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => adjacent.prev_id && router.push(`/assets/${adjacent.prev_id}`)}
+            disabled={!adjacent.prev_id}
+            aria-label="Previous photo"
+            className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-900 disabled:cursor-default disabled:opacity-30"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-5 w-5">
+              <path fillRule="evenodd" d="M11.78 5.22a.75.75 0 0 1 0 1.06L8.06 10l3.72 3.72a.75.75 0 1 1-1.06 1.06l-4.25-4.25a.75.75 0 0 1 0-1.06l4.25-4.25a.75.75 0 0 1 1.06 0Z" clipRule="evenodd" />
+            </svg>
+          </button>
+          <button
+            onClick={() => adjacent.next_id && router.push(`/assets/${adjacent.next_id}`)}
+            disabled={!adjacent.next_id}
+            aria-label="Next photo"
+            className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-900 disabled:cursor-default disabled:opacity-30"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-5 w-5">
+              <path fillRule="evenodd" d="M8.22 5.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06-1.06L11.94 10 8.22 6.28a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" />
+            </svg>
+          </button>
+        </div>
       </div>
 
       <div className="mx-auto max-w-5xl px-4 py-6 lg:flex lg:gap-8">
