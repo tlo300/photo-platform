@@ -410,25 +410,35 @@ export default function Home() {
   }, [query, token]);
 
   // Track active year from scroll position.
+  const updateActiveYear = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const sections = el.querySelectorAll<HTMLElement>("section[data-date]");
+    const containerTop = el.getBoundingClientRect().top;
+    const half = el.clientHeight / 2;
+    let current: number | null = null;
+    for (const section of sections) {
+      if (section.getBoundingClientRect().top - containerTop <= half) {
+        const date = section.getAttribute("data-date");
+        if (date && date !== "unknown") {
+          current = parseInt(date.slice(0, 4), 10);
+        }
+      }
+    }
+    setActiveYear(current);
+  }, []);
+
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    const handleScroll = () => {
-      const sections = el.querySelectorAll<HTMLElement>("section[data-date]");
-      let current: number | null = null;
-      for (const section of sections) {
-        if (section.offsetTop - el.scrollTop <= el.clientHeight / 2) {
-          const date = section.getAttribute("data-date");
-          if (date && date !== "unknown") {
-            current = parseInt(date.slice(0, 4), 10);
-          }
-        }
-      }
-      setActiveYear(current);
-    };
-    el.addEventListener("scroll", handleScroll, { passive: true });
-    return () => el.removeEventListener("scroll", handleScroll);
-  }, []);
+    el.addEventListener("scroll", updateActiveYear, { passive: true });
+    return () => el.removeEventListener("scroll", updateActiveYear);
+  }, [updateActiveYear]);
+
+  // Set active year once after first batch of photos renders.
+  useEffect(() => {
+    if (items.length > 0) updateActiveYear();
+  }, [items.length, updateActiveYear]);
 
   if (!ready || !token) return null;
 
@@ -449,7 +459,8 @@ export default function Home() {
     if (!el) return;
     const target = el.querySelector<HTMLElement>(selector);
     if (target) {
-      el.scrollTo({ top: target.offsetTop - 8, behavior: "smooth" });
+      const top = target.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop;
+      el.scrollTo({ top: top - 8, behavior: "smooth" });
     }
   };
 
