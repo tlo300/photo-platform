@@ -10,7 +10,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
-import { getAssets, searchAssets, AssetItem } from "@/lib/api";
+import { getAssets, getAssetYears, searchAssets, AssetItem } from "@/lib/api";
 import { MediaCard } from "@/components/MediaCard";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -300,6 +300,7 @@ export default function Home() {
   const gridRef = useRef<HTMLDivElement | null>(null);
   const [containerWidth, setContainerWidth] = useState(0);
   const [activeYear, setActiveYear] = useState<number | null>(null);
+  const [allYears, setAllYears] = useState<number[]>([]);
   const didRestoreScroll = useRef(false);
 
   useEffect(() => {
@@ -358,6 +359,12 @@ export default function Home() {
   useEffect(() => {
     if (ready && token && nextCursor === undefined) fetchPage();
   }, [ready, token, nextCursor, fetchPage]);
+
+  // Fetch all years once so the scrubber shows the full timeline from the start.
+  useEffect(() => {
+    if (!ready || !token) return;
+    getAssetYears(token).then(setAllYears);
+  }, [ready, token]);
 
   // Infinite scroll — observe sentinel relative to the inner scroll container.
   useEffect(() => {
@@ -428,18 +435,14 @@ export default function Home() {
   const isSearching = query.trim().length > 0;
   const groups = groupByDay(items);
 
-  // Build year list for scrubber (descending).
-  const yearMap = new Map<number, string>();
-  for (const g of groups) {
-    if (g.date === "unknown") continue;
-    const year = parseInt(g.date.slice(0, 4), 10);
-    if (!yearMap.has(year)) {
-      yearMap.set(year, `[data-date="${g.date}"]`);
-    }
-  }
-  const scrubberYears: YearEntry[] = Array.from(yearMap.entries())
-    .sort(([a], [b]) => b - a)
-    .map(([year, selector]) => ({ year, selector }));
+  // Build year list for the scrubber.
+  // Use the full list fetched from the API so all years appear from the start,
+  // even before infinite scroll has loaded photos from older years.
+  // The CSS starts-with selector matches the first loaded section for each year.
+  const scrubberYears: YearEntry[] = allYears.map((year) => ({
+    year,
+    selector: `[data-date^="${year}-"]`,
+  }));
 
   const handleYearClick = (selector: string) => {
     const el = scrollRef.current;

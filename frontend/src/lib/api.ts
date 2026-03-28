@@ -388,6 +388,14 @@ export interface AssetDetail {
   tags: AssetTagItem[];
 }
 
+export async function getAssetYears(token: string): Promise<number[]> {
+  const res = await fetch(`${CLIENT_API_URL}/assets/years`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) return [];
+  return res.json();
+}
+
 export async function searchAssets(
   token: string,
   q: string,
