@@ -428,12 +428,13 @@ export default function Home() {
     setActiveYear(current);
   }, []);
 
+  // Attach scroll listener after auth resolves (div not in DOM until ready+token are set).
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     el.addEventListener("scroll", updateActiveYear, { passive: true });
     return () => el.removeEventListener("scroll", updateActiveYear);
-  }, [updateActiveYear]);
+  }, [ready, token, updateActiveYear]);
 
   // Set active year once after first batch of photos renders.
   useEffect(() => {
@@ -455,13 +456,8 @@ export default function Home() {
   }));
 
   const handleYearClick = (selector: string) => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const target = el.querySelector<HTMLElement>(selector);
-    if (target) {
-      const top = target.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop;
-      el.scrollTo({ top: top - 8, behavior: "smooth" });
-    }
+    const target = scrollRef.current?.querySelector<HTMLElement>(selector);
+    target?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
   return (
