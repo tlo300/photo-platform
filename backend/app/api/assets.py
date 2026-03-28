@@ -454,6 +454,22 @@ async def search_assets(
     return PagedAssetResponse(items=items, next_cursor=None)
 
 
+@router.get("/years", response_model=list[int])
+async def get_asset_years(
+    user_id: uuid.UUID = Depends(get_current_user),
+    session: AsyncSession = Depends(get_authed_session),
+) -> list[int]:
+    """Return the distinct years (descending) in which the user has photos with a known capture date."""
+    stmt = (
+        select(func.extract("year", MediaAsset.captured_at).label("year"))
+        .where(MediaAsset.owner_id == user_id, MediaAsset.captured_at.is_not(None))
+        .group_by("year")
+        .order_by(func.extract("year", MediaAsset.captured_at).desc())
+    )
+    rows = list(await session.execute(stmt))
+    return [int(row.year) for row in rows]
+
+
 @router.get("/{asset_id}", response_model=AssetDetail)
 async def get_asset(
     asset_id: uuid.UUID = Path(..., description="Asset UUID"),

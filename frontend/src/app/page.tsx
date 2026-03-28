@@ -10,7 +10,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
-import { getAssets, searchAssets, AssetItem } from "@/lib/api";
+import { getAssets, getAssetYears, searchAssets, AssetItem } from "@/lib/api";
 import { MediaCard } from "@/components/MediaCard";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -253,7 +253,7 @@ function TimelineScrubber({
 }: {
   years: YearEntry[];
   activeYear: number | null;
-  onYearClick: (selector: string) => void;
+  onYearClick: (selector: string, year: number) => void;
 }) {
   if (years.length === 0) return null;
   return (
@@ -261,7 +261,7 @@ function TimelineScrubber({
       {years.map(({ year, selector }) => (
         <button
           key={year}
-          onClick={() => onYearClick(selector)}
+          onClick={() => onYearClick(selector, year)}
           className={`text-xs leading-none transition-colors ${
             activeYear === year
               ? "font-semibold text-gray-900"
@@ -300,6 +300,7 @@ export default function Home() {
   const gridRef = useRef<HTMLDivElement | null>(null);
   const [containerWidth, setContainerWidth] = useState(0);
   const [activeYear, setActiveYear] = useState<number | null>(null);
+  const [allYears, setAllYears] = useState<number[]>([]);
   const didRestoreScroll = useRef(false);
 
   useEffect(() => {
@@ -359,6 +360,12 @@ export default function Home() {
     if (ready && token && nextCursor === undefined) fetchPage();
   }, [ready, token, nextCursor, fetchPage]);
 
+  // Fetch all years once so the scrubber shows the full timeline from the start.
+  useEffect(() => {
+    if (!ready || !token) return;
+    getAssetYears(token).then(setAllYears);
+  }, [ready, token]);
+
   // Infinite scroll — observe sentinel relative to the inner scroll container.
   useEffect(() => {
     const el = sentinelRef.current;
@@ -403,50 +410,74 @@ export default function Home() {
   }, [query, token]);
 
   // Track active year from scroll position.
+  const updateActiveYear = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const sections = el.querySelectorAll<HTMLElement>("section[data-date]");
+    const containerTop = el.getBoundingClientRect().top;
+    const half = el.clientHeight / 2;
+    let current: number | null = null;
+    for (const section of sections) {
+      if (section.getBoundingClientRect().top - containerTop <= half) {
+        const date = section.getAttribute("data-date");
+        if (date && date !== "unknown") {
+          current = parseInt(date.slice(0, 4), 10);
+        }
+      }
+    }
+    setActiveYear(current);
+  }, []);
+
+  // Attach scroll listener after auth resolves (div not in DOM until ready+token are set).
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    const handleScroll = () => {
-      const sections = el.querySelectorAll<HTMLElement>("section[data-date]");
-      let current: number | null = null;
-      for (const section of sections) {
-        if (section.offsetTop - el.scrollTop <= el.clientHeight / 2) {
-          const date = section.getAttribute("data-date");
-          if (date && date !== "unknown") {
-            current = parseInt(date.slice(0, 4), 10);
-          }
-        }
-      }
-      setActiveYear(current);
-    };
-    el.addEventListener("scroll", handleScroll, { passive: true });
-    return () => el.removeEventListener("scroll", handleScroll);
-  }, []);
+    el.addEventListener("scroll", updateActiveYear, { passive: true });
+    return () => el.removeEventListener("scroll", updateActiveYear);
+  }, [ready, token, updateActiveYear]);
+
+  // Set active year once after first batch of photos renders.
+  useEffect(() => {
+    if (items.length > 0) updateActiveYear();
+  }, [items.length, updateActiveYear]);
 
   if (!ready || !token) return null;
 
   const isSearching = query.trim().length > 0;
   const groups = groupByDay(items);
 
-  // Build year list for scrubber (descending).
-  const yearMap = new Map<number, string>();
-  for (const g of groups) {
-    if (g.date === "unknown") continue;
-    const year = parseInt(g.date.slice(0, 4), 10);
-    if (!yearMap.has(year)) {
-      yearMap.set(year, `[data-date="${g.date}"]`);
-    }
-  }
-  const scrubberYears: YearEntry[] = Array.from(yearMap.entries())
-    .sort(([a], [b]) => b - a)
-    .map(([year, selector]) => ({ year, selector }));
+  // Build year list for the scrubber.
+  // Use the full list fetched from the API so all years appear from the start,
+  // even before infinite scroll has loaded photos from older years.
+  // The CSS starts-with selector matches the first loaded section for each year.
+  const scrubberYears: YearEntry[] = allYears.map((year) => ({
+    year,
+    selector: `[data-date^="${year}-"]`,
+  }));
 
-  const handleYearClick = (selector: string) => {
+  const handleYearClick = async (selector: string, year: number) => {
     const el = scrollRef.current;
     if (!el) return;
     const target = el.querySelector<HTMLElement>(selector);
     if (target) {
-      el.scrollTo({ top: target.offsetTop - 8, behavior: "smooth" });
+      // Year already in DOM — scroll to it.
+      const dy = target.getBoundingClientRect().top - el.getBoundingClientRect().top - 8;
+      el.scrollBy({ top: dy, behavior: "smooth" });
+      return;
+    }
+    // Year not loaded yet — reset feed starting from the end of that year.
+    if (!token) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const page = await getAssets(token, undefined, 50, `${year + 1}-01-01T00:00:00Z`);
+      setItems(page.items);
+      setNextCursor(page.next_cursor);
+      el.scrollTop = 0;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load photos");
+    } finally {
+      setLoading(false);
     }
   };
 

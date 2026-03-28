@@ -332,10 +332,12 @@ export interface AssetsPage {
 export async function getAssets(
   token: string,
   cursor?: string,
-  limit = 50
+  limit = 50,
+  dateTo?: string,
 ): Promise<AssetsPage> {
   const params = new URLSearchParams({ limit: String(limit) });
   if (cursor) params.set("cursor", cursor);
+  if (dateTo) params.set("date_to", dateTo);
   const res = await fetch(`${CLIENT_API_URL}/assets?${params}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -386,6 +388,14 @@ export interface AssetDetail {
   metadata: AssetMetadata | null;
   location: AssetLocation | null;
   tags: AssetTagItem[];
+}
+
+export async function getAssetYears(token: string): Promise<number[]> {
+  const res = await fetch(`${CLIENT_API_URL}/assets/years`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) return [];
+  return res.json();
 }
 
 export async function searchAssets(
