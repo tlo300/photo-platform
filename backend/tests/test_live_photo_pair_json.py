@@ -1,8 +1,9 @@
-"""Unit tests for Live Photo pair JSON storage (#134).
+"""Unit tests for asset JSON storage (#134).
 
-Covers the three paths that create a Live Photo pair:
-  1. Direct upload (_ingest_one in upload_tasks)
-  2. Takeout zip import (_ingest_one in takeout_tasks)
+Covers upload_asset_json being written for every ingested asset across all
+three ingest paths:
+  1. Direct upload (_ingest_one in upload_tasks) — live pair and standalone
+  2. Takeout zip import (_ingest_one in takeout_tasks) — live pair and standalone
   3. Backfill (_run_pair_backfill in metadata_tasks)
 
 All tests are pure unit tests — no database, no real object storage, no network.
@@ -24,6 +25,7 @@ import pytest
 
 _FAKE_HEIC = b"\x00\x00\x00\x18ftyp" + b"\x00" * 100
 _FAKE_MP4 = b"\x00\x00\x00\x18ftyp" + b"mp41" + b"\x00" * 100
+_FAKE_JPG = b"\xff\xd8\xff\xe0" + b"\x00" * 100
 
 
 def _make_zip(entries: dict[str, bytes]) -> zipfile.ZipFile:
@@ -56,6 +58,7 @@ def _make_asset(
     mime_type: str = "image/heic",
     original_filename: str = "Photos from 2023/IMG_1234.HEIC",
     storage_key: str | None = None,
+    checksum: str = "abc123",
     is_live_photo: bool = False,
     live_video_key: str | None = None,
 ) -> MagicMock:
@@ -65,6 +68,7 @@ def _make_asset(
     asset.mime_type = mime_type
     asset.original_filename = original_filename
     asset.storage_key = storage_key or f"{asset.owner_id}/{asset.id}/original.heic"
+    asset.checksum = checksum
     asset.is_live_photo = is_live_photo
     asset.live_video_key = live_video_key
     return asset
@@ -103,13 +107,35 @@ def _patch_backfill_session(session: AsyncMock):
 
 
 # ---------------------------------------------------------------------------
+# Shared upload_tasks mock context
+# ---------------------------------------------------------------------------
+
+def _upload_task_patches(mod, mock_storage, asset_id, *, mime="image/heic"):
+    return (
+        patch.object(mod, "storage_service", mock_storage),
+        patch.object(mod, "_detect_mime", return_value=mime),
+        patch.object(mod, "_sha256", return_value="deadbeef"),
+        patch.object(mod, "extract_exif", return_value=MagicMock(
+            captured_at=None,
+            gps_latitude=None,
+            gps_longitude=None,
+            gps_altitude=None,
+        )),
+        patch.object(mod, "apply_exif", new=AsyncMock()),
+        patch.object(mod, "merge_metadata", return_value=MagicMock(captured_at=None)),
+        patch("app.worker.thumbnail_tasks.generate_thumbnails"),
+        patch("uuid.uuid4", return_value=asset_id),
+    )
+
+
+# ---------------------------------------------------------------------------
 # 1. Direct upload path (upload_tasks._ingest_one)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_direct_upload_writes_pair_json():
-    """_ingest_one in upload_tasks calls upload_pair_json for a live pair."""
+async def test_direct_upload_live_pair_writes_asset_json():
+    """Live pair: upload_asset_json called with is_live_photo=True and video fields set."""
     import app.worker.upload_tasks as _mod
 
     owner_id = uuid.uuid4()
@@ -117,33 +143,27 @@ async def test_direct_upload_writes_pair_json():
     mock_storage = MagicMock()
     mock_storage.upload = MagicMock(return_value=f"{owner_id}/{asset_id}/original.heic")
     mock_storage.upload_live_video = MagicMock(return_value=f"{owner_id}/{asset_id}/live.mp4")
-    mock_storage.upload_pair_json = MagicMock(return_value=f"{owner_id}/{asset_id}/pair.json")
+    mock_storage.upload_asset_json = MagicMock(return_value=f"{owner_id}/{asset_id}/asset.json")
 
     mock_job = MagicMock()
     mock_job.errors = []
     mock_job.duplicates = 0
     mock_job.no_sidecar = 0
 
-    session = _make_upload_session()
-
-    with (
-        patch.object(_mod, "storage_service", mock_storage),
-        patch.object(_mod, "_detect_mime", return_value="image/heic"),
-        patch.object(_mod, "_sha256", return_value="deadbeef"),
-        patch.object(_mod, "extract_exif", return_value=MagicMock(
-            captured_at=None,
-            gps_latitude=None,
-            gps_longitude=None,
-            gps_altitude=None,
+    with patch.multiple("app.worker.upload_tasks",
+        storage_service=mock_storage,
+        _detect_mime=MagicMock(return_value="image/heic"),
+        _sha256=MagicMock(return_value="deadbeef"),
+        extract_exif=MagicMock(return_value=MagicMock(
+            captured_at=None, gps_latitude=None, gps_longitude=None, gps_altitude=None,
         )),
-        patch.object(_mod, "apply_exif", new=AsyncMock()),
-        patch.object(_mod, "merge_metadata", return_value=MagicMock(captured_at=None)),
-        patch("app.worker.thumbnail_tasks.generate_thumbnails") as mock_thumb,
-        patch("uuid.uuid4", return_value=asset_id),
-    ):
+        apply_exif=AsyncMock(),
+        merge_metadata=MagicMock(return_value=MagicMock(captured_at=None)),
+    ), patch("app.worker.thumbnail_tasks.generate_thumbnails") as mock_thumb, \
+       patch("uuid.uuid4", return_value=asset_id):
         mock_thumb.delay = MagicMock()
         await _mod._ingest_one(
-            session,
+            _make_upload_session(),
             mock_job,
             owner_id,
             _FAKE_HEIC,
@@ -155,71 +175,73 @@ async def test_direct_upload_writes_pair_json():
             live_video_filename="IMG_001.mp4",
         )
 
-    mock_storage.upload_pair_json.assert_called_once()
-    call_kwargs = mock_storage.upload_pair_json.call_args
-    assert call_kwargs.args[0] == str(owner_id)
-    assert call_kwargs.args[1] == str(asset_id)
-    payload = call_kwargs.args[2]
+    mock_storage.upload_asset_json.assert_called_once()
+    args = mock_storage.upload_asset_json.call_args.args
+    assert args[0] == str(owner_id)
+    assert args[1] == str(asset_id)
+    payload = args[2]
     assert payload["version"] == 1
     assert payload["asset_id"] == str(asset_id)
-    assert payload["still_filename"] == "IMG_001.heic"
+    assert payload["owner_id"] == str(owner_id)
+    assert payload["original_filename"] == "IMG_001.heic"
+    assert payload["mime_type"] == "image/heic"
+    assert payload["checksum"] == "deadbeef"
+    assert payload["is_live_photo"] is True
     assert payload["video_filename"] == "IMG_001.mp4"
-    assert "still_key" in payload
-    assert "video_key" in payload
+    assert payload["video_key"] == f"{owner_id}/{asset_id}/live.mp4"
     assert mock_job.errors == []
 
 
 @pytest.mark.asyncio
-async def test_direct_upload_no_pair_json_for_standalone():
-    """_ingest_one in upload_tasks does NOT call upload_pair_json for a non-live asset."""
+async def test_direct_upload_standalone_writes_asset_json():
+    """Standalone asset: upload_asset_json called with is_live_photo=False, video fields null."""
     import app.worker.upload_tasks as _mod
 
     owner_id = uuid.uuid4()
     asset_id = uuid.uuid4()
     mock_storage = MagicMock()
     mock_storage.upload = MagicMock(return_value=f"{owner_id}/{asset_id}/original.jpg")
-    mock_storage.upload_pair_json = MagicMock()
+    mock_storage.upload_asset_json = MagicMock(return_value=f"{owner_id}/{asset_id}/asset.json")
 
     mock_job = MagicMock()
     mock_job.errors = []
     mock_job.duplicates = 0
     mock_job.no_sidecar = 0
 
-    session = _make_upload_session()
-
-    with (
-        patch.object(_mod, "storage_service", mock_storage),
-        patch.object(_mod, "_detect_mime", return_value="image/jpeg"),
-        patch.object(_mod, "_sha256", return_value="cafebabe"),
-        patch.object(_mod, "extract_exif", return_value=MagicMock(
-            captured_at=None,
-            gps_latitude=None,
-            gps_longitude=None,
-            gps_altitude=None,
+    with patch.multiple("app.worker.upload_tasks",
+        storage_service=mock_storage,
+        _detect_mime=MagicMock(return_value="image/jpeg"),
+        _sha256=MagicMock(return_value="cafebabe"),
+        extract_exif=MagicMock(return_value=MagicMock(
+            captured_at=None, gps_latitude=None, gps_longitude=None, gps_altitude=None,
         )),
-        patch.object(_mod, "apply_exif", new=AsyncMock()),
-        patch.object(_mod, "merge_metadata", return_value=MagicMock(captured_at=None)),
-        patch("app.worker.thumbnail_tasks.generate_thumbnails") as mock_thumb,
-        patch("uuid.uuid4", return_value=asset_id),
-    ):
+        apply_exif=AsyncMock(),
+        merge_metadata=MagicMock(return_value=MagicMock(captured_at=None)),
+    ), patch("app.worker.thumbnail_tasks.generate_thumbnails") as mock_thumb, \
+       patch("uuid.uuid4", return_value=asset_id):
         mock_thumb.delay = MagicMock()
         await _mod._ingest_one(
-            session,
+            _make_upload_session(),
             mock_job,
             owner_id,
-            _FAKE_HEIC,
+            _FAKE_JPG,
             "standalone.jpg",
             rel_path="standalone.jpg",
             target_album_id=None,
         )
 
-    mock_storage.upload_pair_json.assert_not_called()
+    mock_storage.upload_asset_json.assert_called_once()
+    payload = mock_storage.upload_asset_json.call_args.args[2]
+    assert payload["is_live_photo"] is False
+    assert payload["video_filename"] is None
+    assert payload["video_key"] is None
+    assert payload["original_filename"] == "standalone.jpg"
     assert mock_job.errors == []
 
 
 @pytest.mark.asyncio
-async def test_direct_upload_pair_json_failure_does_not_abort():
-    """A StorageError from upload_pair_json is swallowed — ingest succeeds."""
+async def test_direct_upload_asset_json_failure_does_not_abort():
+    """StorageError from upload_asset_json is swallowed — ingest completes, job.errors empty."""
     import app.worker.upload_tasks as _mod
     from app.services.storage import StorageError
 
@@ -228,33 +250,27 @@ async def test_direct_upload_pair_json_failure_does_not_abort():
     mock_storage = MagicMock()
     mock_storage.upload = MagicMock(return_value=f"{owner_id}/{asset_id}/original.heic")
     mock_storage.upload_live_video = MagicMock(return_value=f"{owner_id}/{asset_id}/live.mp4")
-    mock_storage.upload_pair_json = MagicMock(side_effect=StorageError("network hiccup"))
+    mock_storage.upload_asset_json = MagicMock(side_effect=StorageError("s3 timeout"))
 
     mock_job = MagicMock()
     mock_job.errors = []
     mock_job.duplicates = 0
     mock_job.no_sidecar = 0
 
-    session = _make_upload_session()
-
-    with (
-        patch.object(_mod, "storage_service", mock_storage),
-        patch.object(_mod, "_detect_mime", return_value="image/heic"),
-        patch.object(_mod, "_sha256", return_value="deadbeef"),
-        patch.object(_mod, "extract_exif", return_value=MagicMock(
-            captured_at=None,
-            gps_latitude=None,
-            gps_longitude=None,
-            gps_altitude=None,
+    with patch.multiple("app.worker.upload_tasks",
+        storage_service=mock_storage,
+        _detect_mime=MagicMock(return_value="image/heic"),
+        _sha256=MagicMock(return_value="deadbeef"),
+        extract_exif=MagicMock(return_value=MagicMock(
+            captured_at=None, gps_latitude=None, gps_longitude=None, gps_altitude=None,
         )),
-        patch.object(_mod, "apply_exif", new=AsyncMock()),
-        patch.object(_mod, "merge_metadata", return_value=MagicMock(captured_at=None)),
-        patch("app.worker.thumbnail_tasks.generate_thumbnails") as mock_thumb,
-        patch("uuid.uuid4", return_value=asset_id),
-    ):
+        apply_exif=AsyncMock(),
+        merge_metadata=MagicMock(return_value=MagicMock(captured_at=None)),
+    ), patch("app.worker.thumbnail_tasks.generate_thumbnails") as mock_thumb, \
+       patch("uuid.uuid4", return_value=asset_id):
         mock_thumb.delay = MagicMock()
         await _mod._ingest_one(
-            session,
+            _make_upload_session(),
             mock_job,
             owner_id,
             _FAKE_HEIC,
@@ -265,7 +281,7 @@ async def test_direct_upload_pair_json_failure_does_not_abort():
             live_video_filename="IMG_001.mp4",
         )
 
-    mock_storage.upload_pair_json.assert_called_once()
+    mock_storage.upload_asset_json.assert_called_once()
     assert mock_job.errors == []
 
 
@@ -275,18 +291,15 @@ async def test_direct_upload_pair_json_failure_does_not_abort():
 
 
 @pytest.mark.asyncio
-async def test_takeout_ingest_writes_pair_json():
-    """_ingest_one in takeout_tasks calls upload_pair_json for a live pair."""
+async def test_takeout_live_pair_writes_asset_json():
+    """Takeout live pair: upload_asset_json called with is_live_photo=True."""
     import app.worker.takeout_tasks as _mod
     from app.worker.takeout_tasks import _build_live_photo_pairs
 
-    zf = _make_zip(
-        {
-            "Photos from 2023/IMG_1234.HEIC": _FAKE_HEIC,
-            "Photos from 2023/IMG_1234.MP4": _FAKE_MP4,
-        }
-    )
-
+    zf = _make_zip({
+        "Photos from 2023/IMG_1234.HEIC": _FAKE_HEIC,
+        "Photos from 2023/IMG_1234.MP4": _FAKE_MP4,
+    })
     live_photo_pairs = _build_live_photo_pairs(zf.namelist())
     paired_video_names = {sides["video"] for sides in live_photo_pairs.values()}
 
@@ -295,22 +308,20 @@ async def test_takeout_ingest_writes_pair_json():
     mock_storage = MagicMock()
     mock_storage.upload = MagicMock(return_value=f"{owner_id}/{asset_id}/original.heic")
     mock_storage.upload_live_video = MagicMock(return_value=f"{owner_id}/{asset_id}/live.mp4")
-    mock_storage.upload_pair_json = MagicMock(return_value=f"{owner_id}/{asset_id}/pair.json")
+    mock_storage.upload_asset_json = MagicMock(return_value=f"{owner_id}/{asset_id}/asset.json")
 
     mock_job = MagicMock()
     mock_job.errors = []
     mock_job.duplicates = 0
     mock_job.no_sidecar = 0
 
-    session = _make_upload_session()
-
     with (
         patch.object(_mod, "storage_service", mock_storage),
         patch.object(_mod, "_mime_from_magic", return_value="image/heic"),
         patch.object(_mod, "_sha256_bytes", return_value="deadbeef"),
         patch.object(_mod, "extract_exif", return_value=MagicMock(captured_at=None)),
-        patch.object(_mod, "apply_exif", new_callable=lambda: lambda: AsyncMock()),
-        patch.object(_mod, "apply_sidecar", new_callable=lambda: lambda: AsyncMock()),
+        patch.object(_mod, "apply_exif", new=AsyncMock()),
+        patch.object(_mod, "apply_sidecar", new=AsyncMock()),
         patch.object(_mod, "_read_sidecar", return_value=None),
         patch.object(_mod, "parse_sidecar", return_value=None),
         patch.object(_mod, "merge_metadata", return_value=MagicMock(captured_at=None)),
@@ -319,7 +330,7 @@ async def test_takeout_ingest_writes_pair_json():
     ):
         mock_thumb.delay = MagicMock()
         await _mod._ingest_one(
-            session,
+            _make_upload_session(),
             mock_job,
             owner_id,
             zf,
@@ -330,13 +341,66 @@ async def test_takeout_ingest_writes_pair_json():
             paired_video_names=paired_video_names,
         )
 
-    mock_storage.upload_pair_json.assert_called_once()
-    payload = mock_storage.upload_pair_json.call_args.args[2]
+    mock_storage.upload_asset_json.assert_called_once()
+    payload = mock_storage.upload_asset_json.call_args.args[2]
     assert payload["version"] == 1
-    assert payload["still_filename"] == "IMG_1234.HEIC"
+    assert payload["is_live_photo"] is True
+    assert payload["original_filename"] == "IMG_1234.HEIC"
     assert payload["video_filename"] == "IMG_1234.MP4"
-    assert payload["still_key"] == f"{owner_id}/{asset_id}/original.heic"
+    assert payload["storage_key"] == f"{owner_id}/{asset_id}/original.heic"
     assert payload["video_key"] == f"{owner_id}/{asset_id}/live.mp4"
+
+
+@pytest.mark.asyncio
+async def test_takeout_standalone_writes_asset_json():
+    """Takeout standalone asset: upload_asset_json called with is_live_photo=False."""
+    import app.worker.takeout_tasks as _mod
+
+    zf = _make_zip({"Photos from 2022/vacation.jpg": _FAKE_JPG})
+
+    owner_id = uuid.uuid4()
+    asset_id = uuid.uuid4()
+    mock_storage = MagicMock()
+    mock_storage.upload = MagicMock(return_value=f"{owner_id}/{asset_id}/original.jpg")
+    mock_storage.upload_asset_json = MagicMock(return_value=f"{owner_id}/{asset_id}/asset.json")
+
+    mock_job = MagicMock()
+    mock_job.errors = []
+    mock_job.duplicates = 0
+    mock_job.no_sidecar = 0
+
+    with (
+        patch.object(_mod, "storage_service", mock_storage),
+        patch.object(_mod, "_mime_from_magic", return_value="image/jpeg"),
+        patch.object(_mod, "_sha256_bytes", return_value="cafebabe"),
+        patch.object(_mod, "extract_exif", return_value=MagicMock(captured_at=None)),
+        patch.object(_mod, "apply_exif", new=AsyncMock()),
+        patch.object(_mod, "apply_sidecar", new=AsyncMock()),
+        patch.object(_mod, "_read_sidecar", return_value=None),
+        patch.object(_mod, "parse_sidecar", return_value=None),
+        patch.object(_mod, "merge_metadata", return_value=MagicMock(captured_at=None)),
+        patch("app.worker.thumbnail_tasks.generate_thumbnails") as mock_thumb,
+        patch("uuid.uuid4", return_value=asset_id),
+    ):
+        mock_thumb.delay = MagicMock()
+        await _mod._ingest_one(
+            _make_upload_session(),
+            mock_job,
+            owner_id,
+            zf,
+            "Photos from 2022/vacation.jpg",
+            sidecar_map={},
+            album_index=None,
+            live_photo_pairs={},
+            paired_video_names=set(),
+        )
+
+    mock_storage.upload_asset_json.assert_called_once()
+    payload = mock_storage.upload_asset_json.call_args.args[2]
+    assert payload["is_live_photo"] is False
+    assert payload["video_filename"] is None
+    assert payload["video_key"] is None
+    assert payload["original_filename"] == "vacation.jpg"
 
 
 # ---------------------------------------------------------------------------
@@ -345,8 +409,8 @@ async def test_takeout_ingest_writes_pair_json():
 
 
 @pytest.mark.asyncio
-async def test_backfill_writes_pair_json():
-    """_run_pair_backfill calls upload_pair_json for each successfully merged pair."""
+async def test_backfill_writes_asset_json():
+    """_run_pair_backfill calls upload_asset_json for each merged pair."""
     from app.worker.metadata_tasks import _run_pair_backfill
 
     owner_id = uuid.uuid4()
@@ -359,6 +423,7 @@ async def test_backfill_writes_pair_json():
         mime_type="image/heic",
         original_filename="Photos from 2023/IMG_001.HEIC",
         storage_key=f"{owner_id}/{photo_id}/original.heic",
+        checksum="abc123",
     )
     video = _make_asset(
         id=video_id,
@@ -374,22 +439,24 @@ async def test_backfill_writes_pair_json():
     mock_storage = MagicMock()
     mock_storage._client = MagicMock()
     mock_storage._bucket = "photos"
-    mock_storage.upload_pair_json = MagicMock(
-        return_value=f"{owner_id}/{photo_id}/pair.json"
+    mock_storage.upload_asset_json = MagicMock(
+        return_value=f"{owner_id}/{photo_id}/asset.json"
     )
 
     with p1, p2, patch("app.worker.metadata_tasks.storage_service", mock_storage):
         await _run_pair_backfill(owner_id)
 
-    mock_storage.upload_pair_json.assert_called_once()
-    call_args = mock_storage.upload_pair_json.call_args
-    assert call_args.args[0] == str(owner_id)
-    assert call_args.args[1] == str(photo_id)
-    payload = call_args.args[2]
+    mock_storage.upload_asset_json.assert_called_once()
+    args = mock_storage.upload_asset_json.call_args.args
+    assert args[0] == str(owner_id)
+    assert args[1] == str(photo_id)
+    payload = args[2]
     assert payload["version"] == 1
     assert payload["asset_id"] == str(photo_id)
-    assert payload["still_filename"] == photo.original_filename
+    assert payload["owner_id"] == str(owner_id)
+    assert payload["is_live_photo"] is True
+    assert payload["original_filename"] == photo.original_filename
+    assert payload["storage_key"] == photo.storage_key
+    assert payload["checksum"] == "abc123"
     assert payload["video_filename"] == video.original_filename
-    assert payload["still_key"] == photo.storage_key
-    assert payload["video_key"].endswith(".mp4")
     assert "live" in payload["video_key"]

@@ -235,7 +235,7 @@ async def _ingest_one(
 
     staged_key: str | None = None
     staged_live_key: str | None = None
-    staged_pair_key: str | None = None
+    staged_asset_key: str | None = None
     try:
         async with session.begin_nested():
             mime = _detect_mime(data, filename)
@@ -277,23 +277,27 @@ async def _ingest_one(
             if staged_live_key is not None:
                 asset.is_live_photo = True
                 asset.live_video_key = staged_live_key
-                try:
-                    staged_pair_key = storage_service.upload_pair_json(
-                        str(owner_id),
-                        str(asset_id),
-                        {
-                            "version": 1,
-                            "asset_id": str(asset_id),
-                            "still_filename": filename,
-                            "still_key": staged_key,
-                            "video_filename": live_video_filename,
-                            "video_key": staged_live_key,
-                        },
-                    )
-                except StorageError:
-                    logger.warning(
-                        "Could not store pair JSON for asset %s — continuing", asset_id
-                    )
+            try:
+                staged_asset_key = storage_service.upload_asset_json(
+                    str(owner_id),
+                    str(asset_id),
+                    {
+                        "version": 1,
+                        "asset_id": str(asset_id),
+                        "owner_id": str(owner_id),
+                        "original_filename": filename,
+                        "storage_key": staged_key,
+                        "mime_type": mime,
+                        "checksum": checksum,
+                        "is_live_photo": staged_live_key is not None,
+                        "video_filename": live_video_filename,
+                        "video_key": staged_live_key,
+                    },
+                )
+            except StorageError:
+                logger.warning(
+                    "Could not store asset JSON for asset %s — continuing", asset_id
+                )
             session.add(asset)
             await session.execute(
                 text(
@@ -382,9 +386,9 @@ async def _ingest_one(
         if staged_live_key is not None:
             with contextlib.suppress(StorageError):
                 storage_service.delete(staged_live_key)
-        if staged_pair_key is not None:
+        if staged_asset_key is not None:
             with contextlib.suppress(StorageError):
-                storage_service.delete(staged_pair_key)
+                storage_service.delete(staged_asset_key)
         errors = list(job.errors or [])
         errors.append({"filename": filename, "reason": str(exc)})
         job.errors = errors

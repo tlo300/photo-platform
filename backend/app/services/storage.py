@@ -169,15 +169,16 @@ class StorageService:
             url = url.replace(self._internal_url, settings.storage_public_url, 1)
         return url
 
-    def upload_pair_json(self, user_id: str, asset_id: str, payload: dict) -> str:
-        """Store a JSON record of a Live Photo pair at ``{user_id}/{asset_id}/pair.json``.
+    def upload_asset_json(self, user_id: str, asset_id: str, payload: dict) -> str:
+        """Store a JSON record of an asset at ``{user_id}/{asset_id}/asset.json``.
 
         The file serves as a storage-level fallback: if the database is ever
-        lost the pairing can be reconstructed by reading this object.
+        lost, asset metadata (filename, storage key, MIME type, checksum, and
+        live-photo pairing) can be reconstructed by reading this object.
 
         Returns the key that was written.
         """
-        key = f"{user_id}/{asset_id}/pair.json"
+        key = f"{user_id}/{asset_id}/asset.json"
         body = json.dumps(payload).encode()
         try:
             self._client.put_object(
@@ -187,8 +188,8 @@ class StorageService:
                 ContentType="application/json",
             )
         except ClientError as exc:
-            raise StorageError(f"Pair JSON upload failed for key {key!r}: {exc}") from exc
-        logger.debug("Uploaded pair JSON %r", key)
+            raise StorageError(f"Asset JSON upload failed for key {key!r}: {exc}") from exc
+        logger.debug("Uploaded asset JSON %r", key)
         return key
 
     def delete(self, key: str) -> None:
