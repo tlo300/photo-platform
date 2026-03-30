@@ -79,10 +79,24 @@ Update this section at the end of every working session.
 
 ```
 Active milestone : Extra Requirements
-Last completed  : 2026-03-30 write asset.json for every ingested asset — PR #152 (merged)
+Last completed  : 2026-03-30 photo modal overlay (#150, #151) — PR #153 (open)
 In progress     : (none)
 Blocked         : (none)
 ```
+
+### Handoff — 2026-03-30 (#150 #151 Photo modal overlay — PR #153)
+**Completed:**
+- `frontend/src/app/layout.tsx`: added `modal` parallel route slot alongside `children`
+- `frontend/src/app/@modal/default.tsx`: null render — no modal when slot is inactive
+- `frontend/src/app/@modal/(.)assets/[id]/page.tsx`: intercepting route — full-screen dark overlay wrapping the existing `AssetDetailPage`; Escape key and backdrop click both call `router.back()`
+- Clicking a photo from the feed or from an album now opens the detail as a modal; background page stays mounted so scroll position is preserved naturally (#150 resolved as a side-effect)
+- Prev/next chevrons in the detail bar use `router.push('/assets/[id]')` which is also intercepted — navigation stays within the modal
+- Direct URL `/assets/[id]` still shows the full standalone page (for sharing/bookmarks)
+
+**Gotchas:**
+- Next.js parallel route slot (`@modal`) must be declared in the nearest layout that wraps both the background page and the modal; root `layout.tsx` is the right place here
+- Intercepting route syntax `(.)assets/[id]` intercepts at the same segment level; `(..)` would intercept one level up — wrong here
+- `position: sticky` on the detail page's top bar sticks to the nearest `overflow` ancestor, which is the modal's scrollable container div — correct behaviour, the bar stays at the top of the visible modal area
 
 ### Handoff — 2026-03-30 (#134 Store Live Photo pair JSON — PR #152)
 **Completed:**
