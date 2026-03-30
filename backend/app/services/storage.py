@@ -6,6 +6,7 @@ between MinIO and any S3-compatible endpoint requires only env-var changes —
 no code modifications.
 """
 
+import json
 import logging
 from typing import BinaryIO
 
@@ -167,6 +168,29 @@ class StorageService:
         if settings.storage_public_url:
             url = url.replace(self._internal_url, settings.storage_public_url, 1)
         return url
+
+    def upload_asset_json(self, user_id: str, asset_id: str, payload: dict) -> str:
+        """Store a JSON record of an asset at ``{user_id}/{asset_id}/asset.json``.
+
+        The file serves as a storage-level fallback: if the database is ever
+        lost, asset metadata (filename, storage key, MIME type, checksum, and
+        live-photo pairing) can be reconstructed by reading this object.
+
+        Returns the key that was written.
+        """
+        key = f"{user_id}/{asset_id}/asset.json"
+        body = json.dumps(payload).encode()
+        try:
+            self._client.put_object(
+                Bucket=self._bucket,
+                Key=key,
+                Body=body,
+                ContentType="application/json",
+            )
+        except ClientError as exc:
+            raise StorageError(f"Asset JSON upload failed for key {key!r}: {exc}") from exc
+        logger.debug("Uploaded asset JSON %r", key)
+        return key
 
     def delete(self, key: str) -> None:
         """Delete the object at *key*."""
