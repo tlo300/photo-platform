@@ -8,7 +8,8 @@ Processing pipeline per uploaded file:
   5. Write MediaAsset row + increment users.storage_used_bytes
   6. Extract EXIF → set asset.captured_at
   7. apply_exif → write MediaMetadata row
-  8. Album linking:
+  8. Insert Location row from EXIF GPS + dispatch geocode task
+  9. Album linking:
      - If rel_path has directory components → ensure album hierarchy (rooted at
        target_album_id when provided)
      - Else if target_album_id is set → link asset directly to that album
@@ -34,12 +35,13 @@ from pathlib import PurePosixPath
 import filetype as _filetype
 from botocore.exceptions import ClientError
 from sqlalchemy import func, or_, select, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.config import settings
 from app.models.album import Album, AlbumAsset
 from app.models.import_job import ImportJob, ImportJobStatus
-from app.models.media import MediaAsset
+from app.models.media import Location, MediaAsset
 from app.services.exif import apply_exif, extract_exif
 from app.services.metadata_merge import merge_metadata
 from app.services.storage import StorageError, storage_service
@@ -310,6 +312,22 @@ async def _ingest_one(
             session.add(asset)
             await apply_exif(session, asset_id=asset_id, result=exif_result)
 
+            # Insert location from EXIF GPS (same pattern as metadata_tasks._apply_metadata)
+            new_location = False
+            if exif_result.gps_latitude is not None and exif_result.gps_longitude is not None:
+                from geoalchemy2.functions import ST_MakePoint
+                stmt = (
+                    pg_insert(Location)
+                    .values(
+                        asset_id=asset_id,
+                        point=ST_MakePoint(exif_result.gps_longitude, exif_result.gps_latitude),
+                        altitude_metres=exif_result.gps_altitude,
+                    )
+                    .on_conflict_do_nothing(index_elements=["asset_id"])
+                )
+                await session.execute(stmt)
+                new_location = True
+
             # Album linking
             dir_part = str(PurePosixPath(rel_path).parent) if rel_path else ""
             has_dir = dir_part and dir_part != "."
@@ -330,6 +348,13 @@ async def _ingest_one(
         # Dispatch thumbnail generation outside the savepoint
         from app.worker.thumbnail_tasks import generate_thumbnails
         generate_thumbnails.delay(str(asset_id), str(owner_id))
+
+        if new_location and exif_result.gps_latitude is not None:
+            from app.worker.geocode_tasks import resolve_asset_geocode
+            resolve_asset_geocode.delay(
+                str(asset_id), str(owner_id),
+                exif_result.gps_latitude, exif_result.gps_longitude,
+            )
 
     except Exception as exc:
         logger.warning("Failed to ingest %s: %s", filename, exc)

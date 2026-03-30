@@ -278,7 +278,7 @@ function TimelineScrubber({
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function Home() {
-  const { token, ready } = useAuth();
+  const { token, ready, logout } = useAuth();
   const router = useRouter();
 
   // Timeline state
@@ -493,6 +493,12 @@ export default function Home() {
           <Link href="/albums" className="text-sm text-gray-500 hover:text-gray-900">
             Albums
           </Link>
+          <button
+            onClick={async () => { await logout(); router.push("/login"); }}
+            className="text-sm text-gray-500 hover:text-gray-900"
+          >
+            Log out
+          </button>
         </div>
       </div>
 

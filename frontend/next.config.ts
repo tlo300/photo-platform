@@ -11,6 +11,7 @@ const CSP = [
   "img-src 'self' blob: data:",
   "font-src 'self'",
   "connect-src 'self'",
+  "frame-src https://www.openstreetmap.org",
   "frame-ancestors 'none'",
   "base-uri 'self'",
   "form-action 'self'",
