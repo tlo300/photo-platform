@@ -342,6 +342,26 @@ async def _run_pair_backfill(owner_id: uuid.UUID) -> None:
                 photo.is_live_photo = True
                 photo.live_video_key = new_key
 
+                # Store a JSON record so the pair can be reconstructed from storage alone.
+                try:
+                    storage_service.upload_pair_json(
+                        str(owner_id),
+                        str(photo.id),
+                        {
+                            "version": 1,
+                            "asset_id": str(photo.id),
+                            "still_filename": photo.original_filename,
+                            "still_key": photo.storage_key,
+                            "video_filename": video.original_filename,
+                            "video_key": new_key,
+                        },
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Live pair backfill: could not store pair JSON for asset %s: %s",
+                        photo.id, exc,
+                    )
+
                 # Delete the old S3 object then remove the DB row.
                 try:
                     storage_service._client.delete_object(
