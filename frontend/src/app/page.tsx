@@ -238,6 +238,17 @@ function SearchGrid({
   );
 }
 
+/** Returns the element's offsetTop relative to a given ancestor container. */
+function offsetTopWithin(el: HTMLElement, container: HTMLElement): number {
+  let top = 0;
+  let current: HTMLElement | null = el;
+  while (current && current !== container) {
+    top += current.offsetTop;
+    current = current.offsetParent as HTMLElement | null;
+  }
+  return top;
+}
+
 // ─── Timeline scrubber ────────────────────────────────────────────────────────
 
 interface YearEntry {
@@ -302,6 +313,7 @@ export default function Home() {
   const [activeYear, setActiveYear] = useState<number | null>(null);
   const [allYears, setAllYears] = useState<number[]>([]);
   const didRestoreScroll = useRef(false);
+  const pendingScrollSelector = useRef<string | null>(null);
 
   useEffect(() => {
     if (ready && !token) router.replace("/login");
@@ -329,6 +341,17 @@ export default function Home() {
       sessionStorage.removeItem(SCROLL_KEY);
     }
     didRestoreScroll.current = true;
+  }, [items]);
+
+  // After items update (year prefetch), scroll to the pending selector.
+  useLayoutEffect(() => {
+    if (!pendingScrollSelector.current || !scrollRef.current) return;
+    const el = scrollRef.current;
+    const target = el.querySelector<HTMLElement>(pendingScrollSelector.current);
+    if (target) {
+      pendingScrollSelector.current = null;
+      el.scrollTop = offsetTopWithin(target, el) - 8;
+    }
   }, [items]);
 
   const handleAssetClick = useCallback((id: string) => {
@@ -461,19 +484,18 @@ export default function Home() {
     const target = el.querySelector<HTMLElement>(selector);
     if (target) {
       // Year already in DOM — scroll to it.
-      const dy = target.getBoundingClientRect().top - el.getBoundingClientRect().top - 8;
-      el.scrollBy({ top: dy, behavior: "smooth" });
+      el.scrollTop = offsetTopWithin(target, el) - 8;
       return;
     }
-    // Year not loaded yet — reset feed starting from the end of that year.
+    // Year not loaded yet — reset feed to start from the end of that year.
     if (!token) return;
     setLoading(true);
     setError(null);
     try {
       const page = await getAssets(token, undefined, 50, `${year + 1}-01-01T00:00:00Z`);
+      pendingScrollSelector.current = selector;
       setItems(page.items);
       setNextCursor(page.next_cursor);
-      el.scrollTop = 0;
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load photos");
     } finally {
