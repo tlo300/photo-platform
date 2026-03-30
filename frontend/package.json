@@ -22,7 +22,7 @@
     "@tailwindcss/postcss": "^4",
     "autoprefixer": "^10",
     "jest": "^30",
-    "jest-environment-node": "^29",
+    "jest-environment-node": "^30",
     "postcss": "^8",
     "tailwindcss": "^4",
     "ts-jest": "^29",
