@@ -79,7 +79,7 @@ Update this section at the end of every working session.
 
 ```
 Active milestone : Extra Requirements
-Last completed  : 2026-03-30 store pair.json in S3 for Live Photo pairs — PR #152
+Last completed  : 2026-03-30 write asset.json for every ingested asset — PR #152 (merged)
 In progress     : (none)
 Blocked         : (none)
 ```
