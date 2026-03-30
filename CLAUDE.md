@@ -79,10 +79,17 @@ Update this section at the end of every working session.
 
 ```
 Active milestone : Extra Requirements
-Last completed  : 2026-03-30 photo modal overlay (#150, #151) — PR #153 (open)
+Last completed  : 2026-03-30 fix modal click-outside — PR #154 (merged)
 In progress     : (none)
 Blocked         : (none)
 ```
+
+### Handoff — 2026-03-30 (Fix modal click-outside — PR #154)
+**Completed:**
+- `@modal/(.)assets/[id]/page.tsx`: moved `router.back()` from the backdrop div to the scrollable container div — the backdrop sits behind the scrollable container in z-order, so clicks on the dark area outside the panel were never reaching it
+
+**Gotchas:**
+- On Windows/Docker, the `/app/.next` anonymous volume persists a stale Next.js build; `docker compose stop frontend && docker compose rm -f frontend && docker compose up -d --build frontend` is needed to force a clean build after adding new Next.js route directories (`@modal`, intercepting routes)
 
 ### Handoff — 2026-03-30 (#150 #151 Photo modal overlay — PR #153)
 **Completed:**
