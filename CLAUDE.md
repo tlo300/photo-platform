@@ -79,10 +79,21 @@ Update this section at the end of every working session.
 
 ```
 Active milestone : Extra Requirements
-Last completed  : 2026-03-30 reverse-geocode GPS locations to city names (PR #148)
+Last completed  : 2026-03-30 fix geocode on direct uploads + OSM iframe CSP (commit 8e2bd58)
 In progress     : (none)
 Blocked         : (none)
 ```
+
+### Handoff — 2026-03-30 (Bug fixes: geocode direct uploads + OSM map iframe)
+**Completed:**
+- `upload_tasks._ingest_one`: inserts `Location` row from EXIF GPS after `apply_exif`, dispatches `geocode.resolve_asset` — same pattern as `metadata_tasks._apply_metadata`; was missing so direct uploads were never geocoded
+- `next.config.ts`: added `frame-src https://www.openstreetmap.org` to CSP — was falling back to `default-src 'self'` which blocked the OSM iframe on the asset detail page
+- `page.tsx`: added Log out button to home page nav
+
+**Gotchas:**
+- GPS data is in HEIC files but no location rows existed because the direct upload path never ran the GPS extraction → location insert → geocode dispatch chain
+- `POST /admin/backfill-geocode` won't help if location rows don't exist — need to run `POST /admin/backfill-metadata` first to insert location rows, then geocoding follows automatically
+- Nominatim rate limit (1.1s) means 616 locations takes ~11 min to fully geocode after backfill
 
 ### Handoff — 2026-03-30 (#125 Reverse-geocode GPS locations — PR #148)
 **Completed:**
