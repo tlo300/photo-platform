@@ -28,7 +28,7 @@ export default function PhotoModal() {
       />
 
       {/* Scrollable area so tall content (metadata sidebar) is reachable */}
-      <div className="absolute inset-0 overflow-y-auto">
+      <div className="absolute inset-0 overflow-y-auto" onClick={() => router.back()}>
         <div className="flex min-h-full items-start justify-center px-4 py-8">
           <div
             className="relative w-full max-w-6xl overflow-hidden rounded-lg bg-white shadow-2xl"
