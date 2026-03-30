@@ -201,6 +201,9 @@ async def test_apply_metadata_inserts_location_when_absent():
     mock_engine = AsyncMock()
     mock_engine.dispose = AsyncMock()
 
+    mock_geocode_task = MagicMock()
+    mock_geocode_task.delay = MagicMock()
+
     with (
         patch("app.worker.metadata_tasks.extract_exif", return_value=gps_result),
         patch("app.worker.metadata_tasks.apply_exif", new=AsyncMock()),
@@ -211,6 +214,10 @@ async def test_apply_metadata_inserts_location_when_absent():
         patch(
             "app.worker.metadata_tasks.async_sessionmaker",
             return_value=mock_factory,
+        ),
+        patch(
+            "app.worker.geocode_tasks.resolve_asset_geocode",
+            mock_geocode_task,
         ),
     ):
         from app.worker.metadata_tasks import _apply_metadata
@@ -226,6 +233,9 @@ async def test_apply_metadata_inserts_location_when_absent():
     # session.execute should have been called at least twice:
     # once for SET LOCAL RLS, once for the location INSERT
     assert mock_session.execute.call_count >= 2
+    mock_geocode_task.delay.assert_called_once_with(
+        str(asset_uuid), str(owner_uuid), 52.37, 4.89
+    )
 
 
 @pytest.mark.asyncio

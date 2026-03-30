@@ -1,4 +1,4 @@
-"""Integration tests for GET /assets/{id} (issue #25).
+"""Integration tests for GET /assets/{id} and GET /assets/{id}/adjacent (issues #25, #129).
 
 Covers:
   1. Happy path — returns full detail (presigned URL, metadata, location, tags)
@@ -458,3 +458,154 @@ async def test_live_photo_asset_returns_live_video_url(user_token, live_photo_da
     data = resp.json()
     assert data["is_live_photo"] is True
     assert data["live_video_url"] == "https://example.com/live.mp4"
+
+
+# ---------------------------------------------------------------------------
+# Adjacent asset navigation (issue #129)
+# ---------------------------------------------------------------------------
+
+
+def _insert_asset_at(engine, owner_id: str, captured_at) -> str:
+    """Insert a minimal asset with a specific captured_at. Returns asset UUID."""
+    asset_id = str(uuid.uuid4())
+    checksum = hashlib.sha256(asset_id.encode()).hexdigest()
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO media_assets"
+                " (id, owner_id, original_filename, mime_type, storage_key,"
+                "  file_size_bytes, checksum, captured_at)"
+                " VALUES (:id, :owner_id, :fn, :mime, :key, :size, :chk, :cat)"
+            ),
+            {
+                "id": asset_id,
+                "owner_id": owner_id,
+                "fn": f"nav_{asset_id[:8]}.jpg",
+                "mime": "image/jpeg",
+                "key": f"{owner_id}/{asset_id}/original.jpg",
+                "size": 256,
+                "chk": checksum,
+                "cat": captured_at,
+            },
+        )
+    return asset_id
+
+
+@pytest.fixture(scope="module")
+async def adjacent_data(migrator_engine, admin_token):
+    """Three assets for a dedicated user in timeline order: A (newest) → B → C (oldest).
+
+    Uses a fresh user with no other assets so the adjacency assertions are exact.
+    Also inserts an asset for a second fresh user to verify RLS isolation.
+    """
+    password = "NavP@ss1!"
+
+    # Create the main nav user.
+    nav_email = f"nav-user-{uuid.uuid4().hex[:8]}@test.com"
+    with migrator_engine.connect() as conn:
+        row = conn.execute(
+            text("SELECT id FROM users WHERE role = 'admin' ORDER BY created_at LIMIT 1")
+        ).fetchone()
+        admin_id = str(row[0])
+    nav_invite = _make_invitation(migrator_engine, nav_email, admin_id)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post(
+            REGISTER_URL,
+            json={"email": nav_email, "display_name": "NavUser", "password": password,
+                  "invitation_token": nav_invite},
+        )
+        assert resp.status_code == 201, resp.text
+        nav_token = resp.json()["access_token"]
+
+    # Create the other nav user (for RLS check).
+    other_email = f"nav-other-{uuid.uuid4().hex[:8]}@test.com"
+    other_invite = _make_invitation(migrator_engine, other_email, admin_id)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post(
+            REGISTER_URL,
+            json={"email": other_email, "display_name": "NavOther", "password": password,
+                  "invitation_token": other_invite},
+        )
+        assert resp.status_code == 201, resp.text
+
+    with migrator_engine.connect() as conn:
+        nav_row = conn.execute(
+            text("SELECT id FROM users WHERE email = :e"), {"e": nav_email}
+        ).fetchone()
+        other_row = conn.execute(
+            text("SELECT id FROM users WHERE email = :e"), {"e": other_email}
+        ).fetchone()
+    nav_user_id = str(nav_row[0])
+    other_user_id = str(other_row[0])
+
+    a = _insert_asset_at(migrator_engine, nav_user_id, datetime(2022, 3, 1, tzinfo=timezone.utc))
+    b = _insert_asset_at(migrator_engine, nav_user_id, datetime(2022, 2, 1, tzinfo=timezone.utc))
+    c = _insert_asset_at(migrator_engine, nav_user_id, datetime(2022, 1, 1, tzinfo=timezone.utc))
+    other = _insert_asset_at(migrator_engine, other_user_id, datetime(2022, 2, 1, tzinfo=timezone.utc))
+
+    return {"nav_token": nav_token, "user_id": nav_user_id, "a": a, "b": b, "c": c, "other": other}
+
+
+@pytest.mark.asyncio
+async def test_adjacent_middle_has_both(adjacent_data):
+    """Middle asset B returns prev=A and next=C."""
+    token = adjacent_data["nav_token"]
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(
+            f"/assets/{adjacent_data['b']}/adjacent",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["prev_id"] == adjacent_data["a"]
+    assert data["next_id"] == adjacent_data["c"]
+
+
+@pytest.mark.asyncio
+async def test_adjacent_newest_has_no_prev(adjacent_data):
+    """Newest asset A has no prev (it is first in the feed)."""
+    token = adjacent_data["nav_token"]
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(
+            f"/assets/{adjacent_data['a']}/adjacent",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["prev_id"] is None
+    assert data["next_id"] == adjacent_data["b"]
+
+
+@pytest.mark.asyncio
+async def test_adjacent_oldest_has_no_next(adjacent_data):
+    """Oldest asset C has no next (it is last in the feed)."""
+    token = adjacent_data["nav_token"]
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(
+            f"/assets/{adjacent_data['c']}/adjacent",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["prev_id"] == adjacent_data["b"]
+    assert data["next_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_adjacent_rls_isolation(adjacent_data):
+    """Cannot fetch adjacent for another user's asset — returns 404."""
+    token = adjacent_data["nav_token"]
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(
+            f"/assets/{adjacent_data['other']}/adjacent",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_adjacent_unauthenticated_returns_401():
+    """No token → 401."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/assets/{uuid.uuid4()}/adjacent")
+    assert resp.status_code == 401

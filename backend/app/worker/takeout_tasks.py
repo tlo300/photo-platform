@@ -746,6 +746,12 @@ async def _ingest_one(
         # when the DB write has succeeded.
         from app.worker.thumbnail_tasks import generate_thumbnails
         generate_thumbnails.delay(str(asset_id), str(owner_id))
+        if parsed_sidecar is not None and parsed_sidecar.has_geo:
+            from app.worker.geocode_tasks import resolve_asset_geocode
+            resolve_asset_geocode.delay(
+                str(asset_id), str(owner_id),
+                parsed_sidecar.latitude, parsed_sidecar.longitude,
+            )
 
     except Exception as exc:
         logger.warning("Failed to ingest %s: %s", media_name, exc)
@@ -1015,6 +1021,12 @@ async def _ingest_one_from_path(
         # when the DB write has succeeded.
         from app.worker.thumbnail_tasks import generate_thumbnails
         generate_thumbnails.delay(str(asset_id), str(owner_id))
+        if parsed_sidecar is not None and parsed_sidecar.has_geo:
+            from app.worker.geocode_tasks import resolve_asset_geocode
+            resolve_asset_geocode.delay(
+                str(asset_id), str(owner_id),
+                parsed_sidecar.latitude, parsed_sidecar.longitude,
+            )
 
     except Exception as exc:
         logger.warning("Failed to ingest %s: %s", file_path.name, exc)

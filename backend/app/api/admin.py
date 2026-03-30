@@ -545,3 +545,47 @@ async def backfill_live_photos(
         backfill_live_photo_pairs.delay(str(uid))
 
     return BackfillMetadataResponse(enqueued=len(user_ids))
+
+
+# ---------------------------------------------------------------------------
+# POST /admin/backfill-geocode
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/backfill-geocode",
+    response_model=BackfillMetadataResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def backfill_geocode(
+    user_id: uuid.UUID | None = Query(
+        default=None,
+        description="Limit backfill to a specific user. Omit to run for all users.",
+    ),
+    admin_id: uuid.UUID = Depends(get_admin_user),
+    session: AsyncSession = Depends(get_session),
+) -> BackfillMetadataResponse:
+    """Reverse-geocode all location rows that are missing a city name.
+
+    Dispatches one geocode.backfill_user Celery task per user (or one task
+    when user_id is supplied).  Each user task fans out one
+    geocode.resolve_asset task per location row with display_name IS NULL.
+
+    Idempotent — safe to call multiple times.  Returns the number of
+    user-level tasks enqueued.
+    """
+    from app.worker.geocode_tasks import backfill_user_geocode
+
+    if user_id is not None:
+        user = await session.scalar(select(User).where(User.id == user_id))
+        if user is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
+        user_ids = [user_id]
+    else:
+        rows = await session.scalars(select(User.id))
+        user_ids = list(rows)
+
+    for uid in user_ids:
+        backfill_user_geocode.delay(str(uid))
+
+    return BackfillMetadataResponse(enqueued=len(user_ids))

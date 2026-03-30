@@ -82,9 +82,14 @@ async def _apply_metadata(
     storage_key: str,
     mime_type: str,
     data: bytes,
-) -> None:
-    """Run extraction, upsert media_metadata, and conditionally insert location."""
+) -> bool:
+    """Run extraction, upsert media_metadata, and conditionally insert location.
+
+    Returns True when a new location row was inserted (so the caller can
+    dispatch a geocode task without needing to know the GPS coords).
+    """
     result = extract_exif(data, mime_type)
+    new_location = False
 
     engine = create_async_engine(settings.database_url, pool_pre_ping=True)
     try:
@@ -110,6 +115,7 @@ async def _apply_metadata(
                         .on_conflict_do_nothing(index_elements=["asset_id"])
                     )
                     await session.execute(stmt)
+                    new_location = True
                     logger.debug(
                         "Location inserted from EXIF GPS for asset %s (%.6f, %.6f)",
                         asset_id,
@@ -120,6 +126,14 @@ async def _apply_metadata(
             await session.commit()
     finally:
         await engine.dispose()
+
+    if new_location and result.gps_latitude is not None and result.gps_longitude is not None:
+        from app.worker.geocode_tasks import resolve_asset_geocode
+        resolve_asset_geocode.delay(
+            str(asset_id), str(owner_id), result.gps_latitude, result.gps_longitude
+        )
+
+    return new_location
 
 
 async def _get_user_asset_ids(owner_id: uuid.UUID) -> list[uuid.UUID]:

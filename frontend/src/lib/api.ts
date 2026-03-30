@@ -425,6 +425,19 @@ export async function getAsset(token: string, id: string): Promise<AssetDetail> 
   return res.json();
 }
 
+export interface AdjacentAssets {
+  prev_id: string | null; // newer photo (up the timeline)
+  next_id: string | null; // older photo (down the timeline)
+}
+
+export async function getAdjacentAssets(token: string, id: string): Promise<AdjacentAssets> {
+  const res = await fetch(`${CLIENT_API_URL}/assets/${id}/adjacent`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) return { prev_id: null, next_id: null };
+  return res.json();
+}
+
 export interface AlbumItem {
   id: string;
   title: string;

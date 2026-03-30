@@ -1,16 +1,17 @@
 """Assets API: paginated timeline, search, and detail for the authenticated user's media assets.
 
 Endpoints:
-  GET /assets          — paginated timeline ordered by captured_at DESC, id DESC.
-                         Optional filters: person, date_from, date_to, media_type, has_location,
-                         near (lat,lon), radius_km.
-                         Cursor-based pagination; each response includes a next_cursor field.
-                         When near is specified, results are ordered by distance and next_cursor
-                         is always null (no cursor pagination for geo queries).
-  GET /assets/search   — full-text search across description, tag names, locality, and camera
-                         make/model. Ordered by relevance then captured_at DESC. Empty q returns
-                         first page.
-  GET /assets/{id}     — full detail for a single asset: presigned URL, metadata, location, tags.
+  GET /assets               — paginated timeline ordered by captured_at DESC, id DESC.
+                              Optional filters: person, date_from, date_to, media_type, has_location,
+                              near (lat,lon), radius_km.
+                              Cursor-based pagination; each response includes a next_cursor field.
+                              When near is specified, results are ordered by distance and next_cursor
+                              is always null (no cursor pagination for geo queries).
+  GET /assets/search        — full-text search across description, tag names, locality, and camera
+                              make/model. Ordered by relevance then captured_at DESC. Empty q returns
+                              first page.
+  GET /assets/{id}          — full detail for a single asset: presigned URL, metadata, location, tags.
+  GET /assets/{id}/adjacent — IDs of the previous (newer) and next (older) asset in the timeline.
 """
 
 import base64
@@ -23,7 +24,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from geoalchemy2.functions import ST_X, ST_Y
 from geoalchemy2.types import Geography
 from pydantic import BaseModel
-from sqlalchemy import cast, exists, func, or_, select
+from sqlalchemy import and_, cast, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import get_current_user
@@ -301,7 +302,6 @@ async def list_assets(
         if cursor is not None:
             cursor_at, cursor_id = _decode_cursor(cursor)
             if cursor_at is not None:
-                from sqlalchemy import and_
                 stmt = stmt.where(
                     or_(
                         MediaAsset.captured_at < cursor_at,
@@ -313,7 +313,6 @@ async def list_assets(
                     )
                 )
             else:
-                from sqlalchemy import and_
                 stmt = stmt.where(
                     MediaAsset.captured_at.is_(None),
                     MediaAsset.id < cursor_id,
@@ -594,3 +593,92 @@ async def get_asset_albums(
         )
     )
     return [AssetAlbumItem(id=row.id, title=row.title) for row in rows]
+
+
+# ---------------------------------------------------------------------------
+# Adjacent asset navigation
+# ---------------------------------------------------------------------------
+
+
+class AdjacentAssets(BaseModel):
+    prev_id: uuid.UUID | None  # newer photo (up the timeline)
+    next_id: uuid.UUID | None  # older photo (down the timeline)
+
+
+@router.get("/{asset_id}/adjacent", response_model=AdjacentAssets)
+async def get_adjacent_assets(
+    asset_id: uuid.UUID = Path(..., description="Asset UUID"),
+    user_id: uuid.UUID = Depends(get_current_user),
+    session: AsyncSession = Depends(get_authed_session),
+) -> AdjacentAssets:
+    """Return the IDs of the previous (newer) and next (older) asset in the timeline.
+
+    The timeline is ordered by captured_at DESC NULLS LAST, id DESC — the same ordering
+    used by GET /assets.  Assets with NULL captured_at appear at the very end.
+
+    prev_id: the asset that appears one position before this one (newer).
+    next_id: the asset that appears one position after this one (older).
+    Either field is null when there is no adjacent asset in that direction.
+    """
+    asset = await session.scalar(
+        select(MediaAsset).where(
+            MediaAsset.id == asset_id,
+            MediaAsset.owner_id == user_id,
+        )
+    )
+    if asset is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found.")
+
+    cat = asset.captured_at  # may be None
+
+    # --- prev: the item that comes just before this one (newer) -----------------
+    # An item X comes before current when:
+    #   non-null case: X.captured_at > cat, OR (X.captured_at == cat AND X.id > asset.id)
+    #   null case:     X.captured_at IS NOT NULL, OR (X.captured_at IS NULL AND X.id > asset.id)
+    # Among all such items, the immediate predecessor is the one that ranks LAST in the
+    # feed ordering (DESC NULLS LAST, id DESC), i.e. ORDER BY ASC NULLS FIRST, id ASC LIMIT 1.
+    if cat is not None:
+        prev_filter = or_(
+            MediaAsset.captured_at > cat,
+            and_(MediaAsset.captured_at == cat, MediaAsset.id > asset.id),
+        )
+    else:
+        prev_filter = or_(
+            MediaAsset.captured_at.is_not(None),
+            and_(MediaAsset.captured_at.is_(None), MediaAsset.id > asset.id),
+        )
+
+    prev_row = await session.scalar(
+        select(MediaAsset.id)
+        .where(MediaAsset.owner_id == user_id, prev_filter)
+        .order_by(MediaAsset.captured_at.asc().nulls_first(), MediaAsset.id.asc())
+        .limit(1)
+    )
+
+    # --- next: the item that comes just after this one (older) ------------------
+    # An item X comes after current when:
+    #   non-null case: X.captured_at < cat, OR (X.captured_at == cat AND X.id < asset.id),
+    #                  OR X.captured_at IS NULL
+    #   null case:     X.captured_at IS NULL AND X.id < asset.id
+    # The immediate successor is the one that ranks FIRST in the feed ordering,
+    # i.e. ORDER BY captured_at DESC NULLS LAST, id DESC LIMIT 1.
+    if cat is not None:
+        next_filter = or_(
+            MediaAsset.captured_at < cat,
+            and_(MediaAsset.captured_at == cat, MediaAsset.id < asset.id),
+            MediaAsset.captured_at.is_(None),
+        )
+    else:
+        next_filter = and_(
+            MediaAsset.captured_at.is_(None),
+            MediaAsset.id < asset.id,
+        )
+
+    next_row = await session.scalar(
+        select(MediaAsset.id)
+        .where(MediaAsset.owner_id == user_id, next_filter)
+        .order_by(MediaAsset.captured_at.desc().nulls_last(), MediaAsset.id.desc())
+        .limit(1)
+    )
+
+    return AdjacentAssets(prev_id=prev_row, next_id=next_row)

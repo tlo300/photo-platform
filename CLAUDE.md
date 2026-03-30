@@ -79,10 +79,39 @@ Update this section at the end of every working session.
 
 ```
 Active milestone : Extra Requirements
-Last completed  : 2026-03-28 timeline scrubber year jump (PR #143)
+Last completed  : 2026-03-30 reverse-geocode GPS locations to city names (PR #148)
 In progress     : (none)
 Blocked         : (none)
 ```
+
+### Handoff — 2026-03-30 (#125 Reverse-geocode GPS locations — PR #148)
+**Completed:**
+- `backend/app/services/geocoding.py`: `reverse_geocode(lat, lon) → str | None` — Nominatim reverse-geocoder using stdlib `urllib`, city-level fallback chain (city → town → village → municipality → county → first segment of display_name), ≥1.1 s rate limit, `User-Agent` header, thread-safe
+- `backend/app/worker/geocode_tasks.py`: `geocode.resolve_asset` task (calls geocoder, writes to `Location.display_name`); `geocode.backfill_user` task (fans out resolve_asset for all rows with NULL display_name)
+- `celery_app.py`: `geocode_tasks` added to `include`
+- `metadata_tasks.py`: after new EXIF-sourced location row inserted → dispatch `geocode.resolve_asset`; `_apply_metadata` now returns `bool` (True when new location inserted)
+- `takeout_tasks.py`: after `apply_sidecar` writes GPS → dispatch `geocode.resolve_asset` (both Takeout zip and folder import `_ingest_one` paths)
+- `admin.py`: `POST /admin/backfill-geocode` endpoint (same pattern as backfill-metadata)
+- 10 unit tests in `test_geocode.py`; `test_apply_metadata_inserts_location_when_absent` updated to mock geocode dispatch
+- No migration needed — `Location.display_name` already existed; `GET /assets` already returns it as `locality`; frontend day headers already render it
+
+**Gotchas:**
+- No new pip dependency — uses Python stdlib `urllib.request` for HTTP
+- Rate-limit lock is module-level (`threading.Lock`) — shared across all Celery worker threads in the same process; safe
+- The geocode task is dispatched *after* `session.commit()` returns (via `resolve_asset_geocode.delay()` outside the async `with session` block) — same pattern as `generate_thumbnails.delay()`
+- `_apply_metadata` return value changed from `None` to `bool`; callers that called it via `asyncio.run()` are unaffected (they discard the return)
+
+### Handoff — 2026-03-28 (#129 Prev/Next navigation — PR #145)
+**Completed:**
+- `backend/app/api/assets.py`: new `GET /assets/{id}/adjacent` endpoint — returns `{ prev_id, next_id }` (both nullable UUIDs); uses same `captured_at DESC NULLS LAST, id DESC` ordering as the timeline; handles `NULL captured_at` with correct prev/next filter logic; RLS-scoped + explicit `owner_id` defence-in-depth
+- `frontend/src/lib/api.ts`: `getAdjacentAssets()` + `AdjacentAssets` interface
+- `frontend/src/app/assets/[id]/page.tsx`: `adjacent` state fetched alongside the asset; left/right chevron buttons in top bar; disabled + 30% opacity at the ends of the library; navigation via `router.push` (not `router.back`)
+- 5 new integration tests in `test_asset_detail.py`: middle, first, last, RLS isolation, 401
+
+**Gotchas:**
+- Pre-existing `test_live_photo_asset_returns_live_video_url` failure in `test_asset_detail.py` is a module-scope user ordering issue, not caused by this PR. Same class of flakiness as `test_backfill_asset_retries_on_storage_error`.
+- The adjacent tests use a dedicated fresh user per test run (via inline registration in the fixture) — this avoids interference from other assets inserted by `test_data` and `live_photo_data` fixtures that share the same user.
+- Route `GET /assets/{id}/adjacent` declared after `GET /assets/{id}/albums` — both have distinct path suffixes, no FastAPI ordering conflict.
 
 ### Handoff — 2026-03-28 (#130 Timeline scrubber year jump — PR #143)
 **Completed:**
