@@ -79,7 +79,7 @@ Update this section at the end of every working session.
 
 ```
 Active milestone : Extra Requirements
-Last completed  : 2026-03-31 fix year scrubber scroll — PR open (fix/year-scrubber-scroll)
+Last completed  : 2026-03-31 fix year scrubber scroll — PR #155 (merged)
 In progress     : (none)
 Blocked         : (none)
 ```
