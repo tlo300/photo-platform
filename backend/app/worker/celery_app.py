@@ -15,7 +15,7 @@ celery_app = Celery(
     "photo_platform",
     broker=settings.redis_url,
     backend=settings.redis_url,
-    include=["app.worker.takeout_tasks", "app.worker.thumbnail_tasks", "app.worker.metadata_tasks", "app.worker.upload_tasks"],
+    include=["app.worker.takeout_tasks", "app.worker.thumbnail_tasks", "app.worker.metadata_tasks", "app.worker.upload_tasks", "app.worker.geocode_tasks"],
 )
 
 celery_app.conf.update(
