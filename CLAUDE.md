@@ -79,10 +79,26 @@ Update this section at the end of every working session.
 
 ```
 Active milestone : Extra Requirements
-Last completed  : 2026-03-30 fix geocode on direct uploads + OSM iframe CSP (commit 8e2bd58)
+Last completed  : 2026-03-30 store pair.json in S3 for Live Photo pairs — PR #152
 In progress     : (none)
 Blocked         : (none)
 ```
+
+### Handoff — 2026-03-30 (#134 Store Live Photo pair JSON — PR #152)
+**Completed:**
+- `StorageService.upload_pair_json(user_id, asset_id, payload) → str` — writes `{user_id}/{asset_id}/pair.json` (application/json) via `put_object`; raises `StorageError` on failure
+- Called in all three pair-creation paths after the live video key is set:
+  - `upload_tasks._ingest_one` (direct upload)
+  - `takeout_tasks._ingest_one` (Takeout zip import)
+  - `metadata_tasks._run_pair_backfill` (backfill task)
+- JSON payload: `{version, asset_id, still_filename, still_key, video_filename, video_key}`
+- `staged_pair_key` tracked in both ingest functions → deleted on DB rollback (same as `staged_live_key`)
+- `StorageError` from JSON write is caught and logged; never aborts the main ingest
+- 5 unit tests in `tests/test_live_photo_pair_json.py`; all 17 existing live-photo tests still pass
+
+**Gotchas:**
+- `new_callable=lambda: lambda: AsyncMock()` in patch.object creates a lambda (not AsyncMock) as the mock attribute — calling it with keyword args raises TypeError. Use `new=AsyncMock()` for async function mocks that need to accept keyword args (as done in the new tests).
+- The JSON write is best-effort only; the DB row is the authoritative source of pair info.
 
 ### Handoff — 2026-03-30 (Bug fixes: geocode direct uploads + OSM map iframe)
 **Completed:**
