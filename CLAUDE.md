@@ -79,10 +79,23 @@ Update this section at the end of every working session.
 
 ```
 Active milestone : Extra Requirements
-Last completed  : 2026-03-30 fix modal click-outside — PR #154 (merged)
+Last completed  : 2026-03-31 fix year scrubber scroll — PR open (fix/year-scrubber-scroll)
 In progress     : (none)
 Blocked         : (none)
 ```
+
+### Handoff — 2026-03-31 (Fix year scrubber scroll — fix/year-scrubber-scroll)
+**Completed:**
+- `frontend/src/app/page.tsx`: added `offsetTopWithin(el, container)` helper that walks the offsetParent chain to get an element's absolute position inside a scroll container — more reliable than `getBoundingClientRect()` which is viewport-relative and fragile for off-screen elements
+- Added `pendingScrollSelector` ref + `useLayoutEffect([items])` so that when a year reset loads new items, the scroll to the year section happens after React commits the DOM (not inline in the async handler)
+- For years already in DOM: `el.scrollTop = offsetTopWithin(target, el) - 8`
+- For years not in DOM: reset feed via `date_to = ${year+1}-01-01` (original single-call approach), set `pendingScrollSelector`, then `useLayoutEffect` fires after render to scroll to the section
+
+**Gotchas:**
+- `getBoundingClientRect().top` for elements far below the viewport can behave unexpectedly — always use `offsetTopWithin` for scroll-container-relative positioning
+- `useLayoutEffect` (not `useEffect`) is needed for DOM measurement after state update: fires after commit but before paint, so layout is already complete
+- The merge approach (keeping existing items + appending year items) was tried but creates visible gaps in the timeline when years between existing and jumped-to content are not loaded — reverted to simple reset
+- Scroll still not fully correct in all cases (e.g. jumping to a year that's near but not at the feed start); left as-is per user request
 
 ### Handoff — 2026-03-30 (Fix modal click-outside — PR #154)
 **Completed:**
