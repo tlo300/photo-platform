@@ -102,6 +102,11 @@ export function MediaCard({ asset, width, height, token, onClick }: MediaCardPro
           ▶ LIVE
         </span>
       )}
+      {!asset.is_live_photo && asset.mime_type.startsWith("video/") && (
+        <span className="absolute bottom-1 left-1 rounded-full bg-blue-600/60 px-1 text-xs text-white">
+          ▶ VIDEO
+        </span>
+      )}
     </Link>
   );
 }
