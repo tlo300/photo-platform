@@ -98,17 +98,17 @@ export default function AlbumsPage() {
   if (!ready || !token) return null;
 
   return (
-    <main className="min-h-screen bg-white px-4 py-6">
+    <main className="min-h-screen bg-white px-4 py-6 dark:bg-gray-900">
       {/* Header */}
       <div className="mb-4 flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Link href="/" className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-900">
+          <Link href="/" className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
               <path fillRule="evenodd" d="M11.78 5.22a.75.75 0 0 1 0 1.06L8.06 10l3.72 3.72a.75.75 0 1 1-1.06 1.06l-4.25-4.25a.75.75 0 0 1 0-1.06l4.25-4.25a.75.75 0 0 1 1.06 0Z" clipRule="evenodd" />
             </svg>
             Photos
           </Link>
-          <h1 className="text-lg font-semibold text-gray-900">Albums</h1>
+          <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Albums</h1>
         </div>
 
         <div className="flex items-center gap-3">
@@ -116,25 +116,25 @@ export default function AlbumsPage() {
           <div ref={sortRef} className="relative">
             <button
               onClick={() => setSortOpen((v) => !v)}
-              className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-700 hover:border-gray-400 hover:bg-gray-50"
+              className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-700 hover:border-gray-400 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:border-gray-500 dark:hover:bg-gray-800"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4 text-gray-400">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4 text-gray-400 dark:text-gray-500">
                 <path fillRule="evenodd" d="M2 3.75A.75.75 0 0 1 2.75 3h14.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 3.75Zm0 4.167a.75.75 0 0 1 .75-.75h9.5a.75.75 0 0 1 0 1.5h-9.5a.75.75 0 0 1-.75-.75Zm0 4.166a.75.75 0 0 1 .75-.75h5.5a.75.75 0 0 1 0 1.5h-5.5a.75.75 0 0 1-.75-.75Z" clipRule="evenodd" />
               </svg>
               {SORT_LABELS[sort]}
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4 text-gray-400">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4 text-gray-400 dark:text-gray-500">
                 <path fillRule="evenodd" d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" />
               </svg>
             </button>
 
             {sortOpen && (
-              <div className="absolute right-0 top-full z-20 mt-1 w-48 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg">
+              <div className="absolute right-0 top-full z-20 mt-1 w-48 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800">
                 {(["recent_photo", "last_modified", "title"] as AlbumSort[]).map((option) => (
                   <button
                     key={option}
                     onClick={() => { setSort(option); setSortOpen(false); }}
-                    className={`flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm hover:bg-gray-50 ${
-                      sort === option ? "font-semibold text-gray-900" : "text-gray-700"
+                    className={`flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-700 ${
+                      sort === option ? "font-semibold text-gray-900 dark:text-gray-100" : "text-gray-700 dark:text-gray-300"
                     }`}
                   >
                     {sort === option && (
@@ -152,7 +152,7 @@ export default function AlbumsPage() {
           {/* Create album button */}
           <button
             onClick={() => { setShowForm((v) => !v); setCreateError(null); }}
-            className="flex items-center gap-1.5 rounded-lg bg-gray-900 px-3 py-1.5 text-sm text-white hover:bg-gray-700"
+            className="flex items-center gap-1.5 rounded-lg bg-gray-900 px-3 py-1.5 text-sm text-white hover:bg-gray-700 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-gray-300"
           >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
               <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
@@ -171,37 +171,37 @@ export default function AlbumsPage() {
             value={newTitle}
             onChange={(e) => setNewTitle(e.target.value)}
             placeholder="Album title"
-            className="flex-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-gray-400 focus:bg-white focus:outline-none"
+            className="flex-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-gray-400 focus:bg-white focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-500 dark:focus:border-gray-500 dark:focus:bg-gray-700"
           />
           <button
             type="submit"
             disabled={creating || !newTitle.trim()}
-            className="rounded-lg bg-gray-900 px-4 py-2 text-sm text-white hover:bg-gray-700 disabled:opacity-40"
+            className="rounded-lg bg-gray-900 px-4 py-2 text-sm text-white hover:bg-gray-700 disabled:opacity-40 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-gray-300"
           >
             {creating ? "Creating…" : "Create"}
           </button>
           <button
             type="button"
             onClick={() => { setShowForm(false); setNewTitle(""); setCreateError(null); }}
-            className="rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-600 hover:border-gray-400"
+            className="rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-600 hover:border-gray-400 dark:border-gray-700 dark:text-gray-400 dark:hover:border-gray-500"
           >
             Cancel
           </button>
         </form>
       )}
       {createError && (
-        <p className="mb-4 rounded bg-red-50 px-4 py-2 text-sm text-red-700">{createError}</p>
+        <p className="mb-4 rounded bg-red-50 px-4 py-2 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-400">{createError}</p>
       )}
 
       {/* Error / loading / empty states */}
       {error && (
-        <p className="mb-4 rounded bg-red-50 px-4 py-2 text-sm text-red-700">{error}</p>
+        <p className="mb-4 rounded bg-red-50 px-4 py-2 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-400">{error}</p>
       )}
       {loading && (
-        <p className="py-8 text-center text-sm text-gray-400">Loading…</p>
+        <p className="py-8 text-center text-sm text-gray-400 dark:text-gray-500">Loading…</p>
       )}
       {!loading && albums.length === 0 && !error && (
-        <p className="mt-24 text-center text-gray-400">No albums yet. Create one to get started.</p>
+        <p className="mt-24 text-center text-gray-400 dark:text-gray-500">No albums yet. Create one to get started.</p>
       )}
 
       {/* Albums grid */}
@@ -211,7 +211,7 @@ export default function AlbumsPage() {
             <div key={album.id} className="group relative">
               <Link href={`/albums/${album.id}`} className="block">
                 {/* Cover — 4:3 aspect ratio */}
-                <div className={`aspect-[4/3] overflow-hidden rounded-lg bg-gray-100 ${album.is_hidden ? "opacity-50" : ""}`}>
+                <div className={`aspect-[4/3] overflow-hidden rounded-lg bg-gray-100 dark:bg-gray-800 ${album.is_hidden ? "opacity-50" : ""}`}>
                   {album.cover_thumbnail_url ? (
                     <img
                       src={album.cover_thumbnail_url}
@@ -220,7 +220,7 @@ export default function AlbumsPage() {
                       onError={(e) => { e.currentTarget.style.display = "none"; }}
                     />
                   ) : (
-                    <div className="flex h-full w-full items-center justify-center text-gray-300">
+                    <div className="flex h-full w-full items-center justify-center text-gray-300 dark:text-gray-600">
                       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-12 w-12">
                         <path fillRule="evenodd" d="M1.5 6a2.25 2.25 0 0 1 2.25-2.25h16.5A2.25 2.25 0 0 1 22.5 6v12a2.25 2.25 0 0 1-2.25 2.25H3.75A2.25 2.25 0 0 1 1.5 18V6ZM3 16.06V18c0 .414.336.75.75.75h16.5A.75.75 0 0 0 21 18v-1.94l-2.69-2.689a1.5 1.5 0 0 0-2.12 0l-.88.879.97.97a.75.75 0 1 1-1.06 1.06l-5.16-5.159a1.5 1.5 0 0 0-2.12 0L3 16.061Zm10.125-7.81a1.125 1.125 0 1 1 2.25 0 1.125 1.125 0 0 1-2.25 0Z" clipRule="evenodd" />
                       </svg>
@@ -229,10 +229,10 @@ export default function AlbumsPage() {
                 </div>
                 {/* Title + count */}
                 <div className="mt-2">
-                  <p className="truncate text-sm font-medium text-gray-900">{album.title}</p>
-                  <p className="text-xs text-gray-400">
+                  <p className="truncate text-sm font-medium text-gray-900 dark:text-gray-100">{album.title}</p>
+                  <p className="text-xs text-gray-400 dark:text-gray-500">
                     {album.asset_count} {album.asset_count === 1 ? "item" : "items"}
-                    {album.is_hidden && <span className="ml-1.5 text-gray-300">· hidden from feed</span>}
+                    {album.is_hidden && <span className="ml-1.5 text-gray-300 dark:text-gray-600">· hidden from feed</span>}
                   </p>
                 </div>
               </Link>

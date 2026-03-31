@@ -93,7 +93,7 @@ export default function ImportPage() {
   const importedCount = job ? job.processed - job.duplicates - errorCount : 0;
 
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center gap-6 p-8">
+    <main className="flex min-h-screen flex-col items-center justify-center gap-6 p-8 bg-white dark:bg-gray-900">
       <h1 className="text-2xl font-bold">Import Google Takeout</h1>
 
       {/* ---- Phase: idle ---- */}
@@ -102,11 +102,11 @@ export default function ImportPage() {
           {errorMessage && (
             <p className="text-sm text-red-600">{errorMessage}</p>
           )}
-          <label className="flex flex-col items-center gap-2 w-full cursor-pointer rounded-lg border-2 border-dashed border-gray-300 p-8 hover:border-gray-400">
+          <label className="flex flex-col items-center gap-2 w-full cursor-pointer rounded-lg border-2 border-dashed border-gray-300 p-8 hover:border-gray-400 dark:border-gray-600 dark:hover:border-gray-400">
             {selectedFileName ? (
-              <span className="text-sm font-medium text-gray-800 break-all text-center">{selectedFileName}</span>
+              <span className="text-sm font-medium text-gray-800 break-all text-center dark:text-gray-200">{selectedFileName}</span>
             ) : (
-              <span className="text-sm text-gray-500">Select a Google Takeout zip file</span>
+              <span className="text-sm text-gray-500 dark:text-gray-400">Select a Google Takeout zip file</span>
             )}
             <input
               ref={fileRef}
@@ -128,8 +128,8 @@ export default function ImportPage() {
       {/* ---- Phase: uploading ---- */}
       {phase === "uploading" && (
         <div className="flex flex-col items-center gap-3 w-full max-w-sm">
-          <p className="text-sm text-gray-600">Uploading… {uploadPercent}%</p>
-          <div className="w-full h-3 rounded-full bg-gray-200">
+          <p className="text-sm text-gray-600 dark:text-gray-400">Uploading… {uploadPercent}%</p>
+          <div className="w-full h-3 rounded-full bg-gray-200 dark:bg-gray-700">
             <div
               className="h-3 rounded-full bg-blue-500 transition-all duration-200"
               style={{ width: `${uploadPercent}%` }}
@@ -141,13 +141,13 @@ export default function ImportPage() {
       {/* ---- Phase: processing ---- */}
       {phase === "processing" && (
         <div className="flex flex-col items-center gap-3 w-full max-w-sm">
-          <p className="text-sm text-gray-600">Processing import…</p>
+          <p className="text-sm text-gray-600 dark:text-gray-400">Processing import…</p>
           {job && job.total != null && (
             <>
-              <p className="text-sm text-gray-500">
+              <p className="text-sm text-gray-500 dark:text-gray-400">
                 {job.processed} / {job.total} files
               </p>
-              <div className="w-full h-3 rounded-full bg-gray-200">
+              <div className="w-full h-3 rounded-full bg-gray-200 dark:bg-gray-700">
                 <div
                   className="h-3 rounded-full bg-green-500 transition-all duration-300"
                   style={{ width: `${Math.round((job.processed / job.total) * 100)}%` }}
@@ -156,7 +156,7 @@ export default function ImportPage() {
             </>
           )}
           {job && job.total == null && (
-            <div className="w-full h-3 rounded-full bg-gray-200 overflow-hidden">
+            <div className="w-full h-3 rounded-full bg-gray-200 overflow-hidden dark:bg-gray-700">
               <div className="h-3 w-1/3 rounded-full bg-green-500 animate-pulse" />
             </div>
           )}
@@ -177,38 +177,38 @@ export default function ImportPage() {
 
           {/* Summary counts */}
           <div className="grid grid-cols-3 gap-2 text-center">
-            <div className="rounded-lg border border-gray-200 py-3">
-              <p className="text-2xl font-bold text-gray-800">{importedCount}</p>
-              <p className="text-xs text-gray-500 mt-1">Imported</p>
+            <div className="rounded-lg border border-gray-200 py-3 dark:border-gray-700">
+              <p className="text-2xl font-bold text-gray-800 dark:text-gray-200">{importedCount}</p>
+              <p className="text-xs text-gray-500 mt-1 dark:text-gray-400">Imported</p>
             </div>
-            <div className="rounded-lg border border-gray-200 py-3">
-              <p className="text-2xl font-bold text-gray-800">{job.duplicates}</p>
-              <p className="text-xs text-gray-500 mt-1">Duplicates</p>
+            <div className="rounded-lg border border-gray-200 py-3 dark:border-gray-700">
+              <p className="text-2xl font-bold text-gray-800 dark:text-gray-200">{job.duplicates}</p>
+              <p className="text-xs text-gray-500 mt-1 dark:text-gray-400">Duplicates</p>
             </div>
-            <div className="rounded-lg border border-gray-200 py-3">
-              <p className="text-2xl font-bold text-gray-800">{errorCount}</p>
-              <p className="text-xs text-gray-500 mt-1">Errors</p>
+            <div className="rounded-lg border border-gray-200 py-3 dark:border-gray-700">
+              <p className="text-2xl font-bold text-gray-800 dark:text-gray-200">{errorCount}</p>
+              <p className="text-xs text-gray-500 mt-1 dark:text-gray-400">Errors</p>
             </div>
           </div>
 
           {/* Expandable errors */}
           {errorCount > 0 && (
-            <div className="rounded-lg border border-red-100 bg-red-50">
+            <div className="rounded-lg border border-red-100 bg-red-50 dark:border-red-900/40 dark:bg-red-900/20">
               <button
-                className="flex w-full items-center justify-between px-4 py-2 text-sm text-red-700 font-medium"
+                className="flex w-full items-center justify-between px-4 py-2 text-sm text-red-700 font-medium dark:text-red-400"
                 onClick={() => setExpandedErrors((v) => !v)}
               >
                 <span>{errorCount} file{errorCount !== 1 ? "s" : ""} failed</span>
                 <span>{expandedErrors ? "▲" : "▼"}</span>
               </button>
               {expandedErrors && (
-                <ul className="divide-y divide-red-100 border-t border-red-100">
+                <ul className="divide-y divide-red-100 border-t border-red-100 dark:divide-red-900/40 dark:border-red-900/40">
                   {job.errors.map((e, i) => (
                     <li key={i} className="px-4 py-2">
-                      <p className="text-sm font-medium text-gray-700">
+                      <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
                         {e.filename ?? "(unknown file)"}
                       </p>
-                      <p className="text-xs text-red-600 mt-0.5">{e.reason}</p>
+                      <p className="text-xs text-red-600 mt-0.5 dark:text-red-400">{e.reason}</p>
                     </li>
                   ))}
                 </ul>

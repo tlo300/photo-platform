@@ -55,7 +55,7 @@ export default function AdminInvitationsPage() {
   }
 
   return (
-    <main className="mx-auto max-w-2xl p-8">
+    <main className="mx-auto max-w-2xl p-8 min-h-screen bg-white dark:bg-gray-900">
       <h1 className="mb-6 text-2xl font-bold">Invitations</h1>
 
       {/* Create invitation form */}
@@ -68,26 +68,26 @@ export default function AdminInvitationsPage() {
             placeholder="Email address"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="flex-1 rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+            className="flex-1 rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-black dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:focus:ring-white"
           />
           <button
             type="submit"
             disabled={creating}
-            className="rounded-md bg-black px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-50"
+            className="rounded-md bg-black px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-50 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-200"
           >
             {creating ? "Creating…" : "Create invitation"}
           </button>
         </form>
         {createError && (
-          <p className="mt-2 rounded-md bg-red-100 px-3 py-2 text-sm text-red-800">{createError}</p>
+          <p className="mt-2 rounded-md bg-red-100 px-3 py-2 text-sm text-red-800 dark:bg-red-900/30 dark:text-red-300">{createError}</p>
         )}
         {createdToken && (
-          <div className="mt-3 rounded-md bg-green-50 px-3 py-2 text-sm">
-            <p className="mb-1 font-medium text-green-800">Invitation created. Send this link to the invitee:</p>
-            <code className="block break-all text-green-900">
+          <div className="mt-3 rounded-md bg-green-50 px-3 py-2 text-sm dark:bg-green-900/20">
+            <p className="mb-1 font-medium text-green-800 dark:text-green-300">Invitation created. Send this link to the invitee:</p>
+            <code className="block break-all text-green-900 dark:text-green-400">
               {window.location.origin}/invite/{createdToken}
             </code>
-            <p className="mt-1 text-xs text-green-700">This link will not be shown again.</p>
+            <p className="mt-1 text-xs text-green-700 dark:text-green-400">This link will not be shown again.</p>
           </div>
         )}
       </section>
@@ -95,27 +95,27 @@ export default function AdminInvitationsPage() {
       {/* Pending invitations list */}
       <section>
         <h2 className="mb-3 text-lg font-semibold">
-          Pending invitations{total > 0 && <span className="ml-2 text-sm font-normal text-gray-500">({total})</span>}
+          Pending invitations{total > 0 && <span className="ml-2 text-sm font-normal text-gray-500 dark:text-gray-400">({total})</span>}
         </h2>
         {loadError && (
           <p className="rounded-md bg-red-100 px-3 py-2 text-sm text-red-800">{loadError}</p>
         )}
         {!loadError && invitations.length === 0 && (
-          <p className="text-sm text-gray-500">No pending invitations.</p>
+          <p className="text-sm text-gray-500 dark:text-gray-400">No pending invitations.</p>
         )}
         {invitations.length > 0 && (
           <table className="w-full border-collapse text-sm">
             <thead>
-              <tr className="border-b text-left text-xs font-medium uppercase text-gray-500">
+              <tr className="border-b text-left text-xs font-medium uppercase text-gray-500 dark:border-gray-700 dark:text-gray-400">
                 <th className="pb-2 pr-4">Email</th>
                 <th className="pb-2">Expires</th>
               </tr>
             </thead>
             <tbody>
               {invitations.map((inv) => (
-                <tr key={inv.id} className="border-b last:border-0">
+                <tr key={inv.id} className="border-b last:border-0 dark:border-gray-700">
                   <td className="py-2 pr-4">{inv.email}</td>
-                  <td className="py-2 text-gray-600">
+                  <td className="py-2 text-gray-600 dark:text-gray-400">
                     {new Date(inv.expires_at).toLocaleString()}
                   </td>
                 </tr>

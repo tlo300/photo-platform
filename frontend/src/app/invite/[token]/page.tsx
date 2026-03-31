@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getInvite, registerWithInvitation } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 interface Props {
   params: { token: string };
@@ -53,7 +54,7 @@ export default function InvitePage({ params }: Props) {
       <main className="flex min-h-screen flex-col items-center justify-center p-8">
         <div className="w-full max-w-sm">
           <h1 className="mb-4 text-2xl font-bold">Invalid invitation</h1>
-          <p className="rounded-md bg-red-100 px-3 py-2 text-sm text-red-800">{inviteError}</p>
+          <p className="rounded-md bg-red-100 px-3 py-2 text-sm text-red-800 dark:bg-red-900/30 dark:text-red-300">{inviteError}</p>
         </div>
       </main>
     );
@@ -62,13 +63,16 @@ export default function InvitePage({ params }: Props) {
   if (email === null) {
     return (
       <main className="flex min-h-screen flex-col items-center justify-center p-8">
-        <p className="text-sm text-gray-500">Validating invitation…</p>
+        <p className="text-sm text-gray-500 dark:text-gray-400">Validating invitation…</p>
       </main>
     );
   }
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center p-8">
+      <div className="absolute right-4 top-4">
+        <ThemeToggle />
+      </div>
       <div className="w-full max-w-sm">
         <h1 className="mb-6 text-2xl font-bold">Create account</h1>
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
@@ -82,7 +86,7 @@ export default function InvitePage({ params }: Props) {
               type="email"
               value={email}
               readOnly
-              className="rounded-md border bg-gray-50 px-3 py-2 text-sm text-gray-500"
+              className="rounded-md border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-400"
             />
           </div>
           <div className="flex flex-col gap-1">
@@ -95,7 +99,7 @@ export default function InvitePage({ params }: Props) {
               type="text"
               required
               autoComplete="name"
-              className="rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+              className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-black dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:focus:ring-white"
             />
           </div>
           <div className="flex flex-col gap-1">
@@ -108,16 +112,16 @@ export default function InvitePage({ params }: Props) {
               type="password"
               required
               autoComplete="new-password"
-              className="rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+              className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-black dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:focus:ring-white"
             />
           </div>
           {formError && (
-            <p className="rounded-md bg-red-100 px-3 py-2 text-sm text-red-800">{formError}</p>
+            <p className="rounded-md bg-red-100 px-3 py-2 text-sm text-red-800 dark:bg-red-900/30 dark:text-red-300">{formError}</p>
           )}
           <button
             type="submit"
             disabled={loading}
-            className="rounded-md bg-black px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-50"
+            className="rounded-md bg-black px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-50 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-200"
           >
             {loading ? "Creating account…" : "Create account"}
           </button>

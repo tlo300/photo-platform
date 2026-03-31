@@ -12,6 +12,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { getAssets, getAssetYears, searchAssets, AssetItem } from "@/lib/api";
 import { MediaCard } from "@/components/MediaCard";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -190,9 +191,9 @@ function DaySection({
   return (
     <section data-date={group.date} className="mb-6">
       <div className="mb-2 flex items-baseline gap-2">
-        <h2 className="text-sm font-semibold text-gray-800">{group.label}</h2>
+        <h2 className="text-sm font-semibold text-gray-800 dark:text-gray-200">{group.label}</h2>
         {group.locationSummary && (
-          <span className="text-xs text-gray-400">{group.locationSummary}</span>
+          <span className="text-xs text-gray-400 dark:text-gray-500">{group.locationSummary}</span>
         )}
       </div>
       <div className="flex flex-col gap-0.5">
@@ -224,7 +225,7 @@ function SearchGrid({
   return (
     <div className="grid grid-cols-1 gap-0.5 sm:grid-cols-3 lg:grid-cols-5">
       {assets.map((asset) => (
-        <div key={asset.id} className="aspect-square overflow-hidden bg-gray-100">
+        <div key={asset.id} className="aspect-square overflow-hidden bg-gray-100 dark:bg-gray-800">
           <MediaCard
             asset={asset}
             width={0}
@@ -275,8 +276,8 @@ function TimelineScrubber({
           onClick={() => onYearClick(selector, year)}
           className={`text-xs leading-none transition-colors ${
             activeYear === year
-              ? "font-semibold text-gray-900"
-              : "text-gray-400 hover:text-gray-700"
+              ? "font-semibold text-gray-900 dark:text-gray-100"
+              : "text-gray-400 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-300"
           }`}
         >
           {year}
@@ -561,37 +562,38 @@ export default function Home() {
   };
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-white">
+    <div className="flex h-screen flex-col overflow-hidden bg-white dark:bg-gray-900">
       {/* Nav */}
-      <div className="flex-shrink-0 px-4 py-3 flex items-center justify-between border-b border-gray-100">
-        <span className="text-sm font-semibold text-gray-900">Photos</span>
+      <div className="flex-shrink-0 px-4 py-3 flex items-center justify-between border-b border-gray-100 dark:border-gray-800">
+        <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">Photos</span>
         <div className="flex items-center gap-4">
-          <Link href="/upload" className="text-sm text-gray-500 hover:text-gray-900">
+          <Link href="/upload" className="text-sm text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100">
             Upload
           </Link>
-          <Link href="/albums" className="text-sm text-gray-500 hover:text-gray-900">
+          <Link href="/albums" className="text-sm text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100">
             Albums
           </Link>
-          <Link href="/map" className="text-sm text-gray-500 hover:text-gray-900">
+          <Link href="/map" className="text-sm text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100">
             Map
           </Link>
           <button
             onClick={async () => { await logout(); router.push("/login"); }}
-            className="text-sm text-gray-500 hover:text-gray-900"
+            className="text-sm text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
           >
             Log out
           </button>
+          <ThemeToggle />
         </div>
       </div>
 
       {/* Search bar */}
-      <div className="flex-shrink-0 px-4 py-2 border-b border-gray-100">
+      <div className="flex-shrink-0 px-4 py-2 border-b border-gray-100 dark:border-gray-800">
         <input
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search by description, tag, location, or camera…"
-          className="w-full rounded-lg border border-gray-200 bg-gray-50 px-4 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-gray-400 focus:bg-white focus:outline-none"
+          className="w-full rounded-lg border border-gray-200 bg-gray-50 px-4 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-gray-400 focus:bg-white focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-500 dark:focus:border-gray-500 dark:focus:bg-gray-700"
         />
       </div>
 
@@ -603,13 +605,13 @@ export default function Home() {
           {isSearching && (
             <>
               {searchError && (
-                <p className="mb-4 rounded bg-red-50 px-4 py-2 text-sm text-red-700">{searchError}</p>
+                <p className="mb-4 rounded bg-red-50 px-4 py-2 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-400">{searchError}</p>
               )}
               {searchLoading && (
-                <p className="py-8 text-center text-sm text-gray-400">Searching…</p>
+                <p className="py-8 text-center text-sm text-gray-400 dark:text-gray-500">Searching…</p>
               )}
               {!searchLoading && searchResults !== null && searchResults.length === 0 && (
-                <p className="mt-24 text-center text-gray-400">No results for &ldquo;{query}&rdquo;</p>
+                <p className="mt-24 text-center text-gray-400 dark:text-gray-500">No results for &ldquo;{query}&rdquo;</p>
               )}
               {!searchLoading && searchResults !== null && searchResults.length > 0 && (
                 <SearchGrid assets={searchResults} token={token!} onClickAsset={handleAssetClick} />
@@ -621,10 +623,10 @@ export default function Home() {
           {!isSearching && (
             <>
               {error && (
-                <p className="mb-4 rounded bg-red-50 px-4 py-2 text-sm text-red-700">{error}</p>
+                <p className="mb-4 rounded bg-red-50 px-4 py-2 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-400">{error}</p>
               )}
               {groups.length === 0 && !loading && (
-                <p className="mt-24 text-center text-gray-400">
+                <p className="mt-24 text-center text-gray-400 dark:text-gray-500">
                   No photos yet. Import your Takeout to get started.
                 </p>
               )}
@@ -642,7 +644,7 @@ export default function Home() {
               </div>
               <div ref={sentinelRef} className="h-1" />
               {loading && (
-                <p className="py-8 text-center text-sm text-gray-400">Loading…</p>
+                <p className="py-8 text-center text-sm text-gray-400 dark:text-gray-500">Loading…</p>
               )}
             </>
           )}

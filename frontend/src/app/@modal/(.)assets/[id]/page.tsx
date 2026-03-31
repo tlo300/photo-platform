@@ -31,7 +31,7 @@ export default function PhotoModal() {
       <div className="absolute inset-0 overflow-y-auto" onClick={() => router.back()}>
         <div className="flex min-h-full items-start justify-center px-4 py-8">
           <div
-            className="relative w-full max-w-6xl overflow-hidden rounded-lg bg-white shadow-2xl"
+            className="relative w-full max-w-6xl overflow-hidden rounded-lg bg-white shadow-2xl dark:bg-gray-900"
             onClick={(e) => e.stopPropagation()}
           >
             <AssetDetailPage />

@@ -17,7 +17,7 @@ import type { MapBounds } from "@/components/MapView";
 // Dynamically imported to keep Leaflet (which requires window) out of the SSR bundle.
 const MapView = dynamic(() => import("@/components/MapView"), {
   ssr: false,
-  loading: () => <div className="w-full h-full bg-gray-100 animate-pulse" />,
+  loading: () => <div className="w-full h-full bg-gray-100 animate-pulse dark:bg-gray-800" />,
 });
 
 export default function MapPage() {
@@ -63,14 +63,14 @@ export default function MapPage() {
   );
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-white">
+    <div className="flex h-screen flex-col overflow-hidden bg-white dark:bg-gray-900">
       {/* Nav bar */}
-      <header className="flex shrink-0 items-center gap-4 border-b border-gray-100 px-4 py-3">
-        <Link href="/" className="text-sm text-gray-500 hover:text-gray-900">
+      <header className="flex shrink-0 items-center gap-4 border-b border-gray-100 px-4 py-3 dark:border-gray-800">
+        <Link href="/" className="text-sm text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100">
           ← Photos
         </Link>
-        <span className="text-sm font-semibold text-gray-900">Map</span>
-        <span className="ml-auto text-xs text-gray-400">
+        <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">Map</span>
+        <span className="ml-auto text-xs text-gray-400 dark:text-gray-500">
           {points.length > 0 ? `${points.length.toLocaleString()} geotagged photos` : ""}
         </span>
       </header>
@@ -85,9 +85,9 @@ export default function MapPage() {
         </div>
 
         {/* Side panel */}
-        <aside className="flex w-[36rem] shrink-0 flex-col border-l border-gray-100 bg-white">
+        <aside className="flex w-[36rem] shrink-0 flex-col border-l border-gray-100 bg-white dark:border-gray-800 dark:bg-gray-900">
           {/* Panel header */}
-          <div className="shrink-0 border-b border-gray-100 px-3 py-2 text-xs font-medium text-gray-500">
+          <div className="shrink-0 border-b border-gray-100 px-3 py-2 text-xs font-medium text-gray-500 dark:border-gray-800 dark:text-gray-400">
             {panelLoading
               ? "Loading…"
               : panelItems.length === 0
@@ -112,7 +112,7 @@ export default function MapPage() {
                       className="h-full w-full object-cover"
                     />
                   ) : (
-                    <div className="h-full w-full bg-gray-200" />
+                    <div className="h-full w-full bg-gray-200 dark:bg-gray-700" />
                   )}
                 </button>
               ))}

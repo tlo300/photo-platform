@@ -113,7 +113,7 @@ export default function AssetDetailPage() {
   if (loading) {
     return (
       <main className="flex min-h-screen items-center justify-center">
-        <p className="text-sm text-gray-400">Loading…</p>
+        <p className="text-sm text-gray-400 dark:text-gray-500">Loading…</p>
       </main>
     );
   }
@@ -121,10 +121,10 @@ export default function AssetDetailPage() {
   if (error || !asset) {
     return (
       <main className="flex min-h-screen flex-col items-center justify-center gap-4">
-        <p className="rounded bg-red-50 px-4 py-2 text-sm text-red-700">
+        <p className="rounded bg-red-50 px-4 py-2 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-400">
           {error ?? "Asset not found."}
         </p>
-        <button onClick={() => router.back()} className="text-sm text-blue-600 underline">
+        <button onClick={() => router.back()} className="text-sm text-blue-600 underline dark:text-blue-400">
           Go back
         </button>
       </main>
@@ -146,12 +146,12 @@ export default function AssetDetailPage() {
     : null;
 
   return (
-    <main className="min-h-screen bg-white">
+    <main className="min-h-screen bg-white dark:bg-gray-900">
       {/* Top bar */}
-      <div className="sticky top-0 z-10 flex items-center gap-3 border-b bg-white px-4 py-3">
+      <div className="sticky top-0 z-10 flex items-center gap-3 border-b border-gray-200 bg-white px-4 py-3 dark:border-gray-700 dark:bg-gray-900">
         <button
           onClick={() => router.back()}
-          className="flex items-center gap-1 text-sm text-gray-600 hover:text-gray-900"
+          className="flex items-center gap-1 text-sm text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -167,14 +167,14 @@ export default function AssetDetailPage() {
           </svg>
           Back
         </button>
-        <span className="flex-1 truncate text-sm text-gray-500">{asset.original_filename}</span>
+        <span className="flex-1 truncate text-sm text-gray-500 dark:text-gray-400">{asset.original_filename}</span>
         {/* Prev / Next navigation */}
         <div className="flex items-center gap-1">
           <button
             onClick={() => adjacent.prev_id && router.push(`/assets/${adjacent.prev_id}`)}
             disabled={!adjacent.prev_id}
             aria-label="Previous photo"
-            className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-900 disabled:cursor-default disabled:opacity-30"
+            className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-900 disabled:cursor-default disabled:opacity-30 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100"
           >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-5 w-5">
               <path fillRule="evenodd" d="M11.78 5.22a.75.75 0 0 1 0 1.06L8.06 10l3.72 3.72a.75.75 0 1 1-1.06 1.06l-4.25-4.25a.75.75 0 0 1 0-1.06l4.25-4.25a.75.75 0 0 1 1.06 0Z" clipRule="evenodd" />
@@ -184,7 +184,7 @@ export default function AssetDetailPage() {
             onClick={() => adjacent.next_id && router.push(`/assets/${adjacent.next_id}`)}
             disabled={!adjacent.next_id}
             aria-label="Next photo"
-            className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-900 disabled:cursor-default disabled:opacity-30"
+            className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-900 disabled:cursor-default disabled:opacity-30 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100"
           >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-5 w-5">
               <path fillRule="evenodd" d="M8.22 5.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06-1.06L11.94 10 8.22 6.28a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" />
@@ -198,13 +198,13 @@ export default function AssetDetailPage() {
         <div className="flex flex-1 flex-col items-center gap-3">
           {/* Live photo toggle */}
           {hasLiveVideo && (
-            <div className="flex rounded-full border border-gray-200 p-0.5 text-sm">
+            <div className="flex rounded-full border border-gray-200 p-0.5 text-sm dark:border-gray-700">
               <button
                 onClick={() => setLiveMode("photo")}
                 className={`rounded-full px-4 py-1 transition-colors ${
                   liveMode === "photo"
-                    ? "bg-gray-900 text-white"
-                    : "text-gray-500 hover:text-gray-800"
+                    ? "bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900"
+                    : "text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200"
                 }`}
               >
                 Photo
@@ -213,8 +213,8 @@ export default function AssetDetailPage() {
                 onClick={() => setLiveMode("live")}
                 className={`rounded-full px-4 py-1 transition-colors ${
                   liveMode === "live"
-                    ? "bg-gray-900 text-white"
-                    : "text-gray-500 hover:text-gray-800"
+                    ? "bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900"
+                    : "text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200"
                 }`}
               >
                 Live
@@ -254,45 +254,45 @@ export default function AssetDetailPage() {
           {/* Date */}
           {capturedAt && (
             <section>
-              <h2 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-400">Date</h2>
-              <p className="text-sm text-gray-700">{capturedAt}</p>
+              <h2 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">Date</h2>
+              <p className="text-sm text-gray-700 dark:text-gray-300">{capturedAt}</p>
             </section>
           )}
 
           {/* Description */}
           {asset.description && (
             <section>
-              <h2 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-400">Description</h2>
-              <p className="text-sm text-gray-700">{asset.description}</p>
+              <h2 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">Description</h2>
+              <p className="text-sm text-gray-700 dark:text-gray-300">{asset.description}</p>
             </section>
           )}
 
           {/* File info */}
           <section>
-            <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">File</h2>
+            <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">File</h2>
             <dl className="space-y-1 text-sm">
               <div className="flex justify-between">
-                <dt className="text-gray-400">Name</dt>
-                <dd className="max-w-[60%] truncate text-right text-gray-700">{asset.original_filename}</dd>
+                <dt className="text-gray-400 dark:text-gray-500">Name</dt>
+                <dd className="max-w-[60%] truncate text-right text-gray-700 dark:text-gray-300">{asset.original_filename}</dd>
               </div>
               <div className="flex justify-between">
-                <dt className="text-gray-400">Type</dt>
-                <dd className="text-gray-700">{asset.mime_type}</dd>
+                <dt className="text-gray-400 dark:text-gray-500">Type</dt>
+                <dd className="text-gray-700 dark:text-gray-300">{asset.mime_type}</dd>
               </div>
               <div className="flex justify-between">
-                <dt className="text-gray-400">Size</dt>
-                <dd className="text-gray-700">{formatFileSize(asset.file_size_bytes)}</dd>
+                <dt className="text-gray-400 dark:text-gray-500">Size</dt>
+                <dd className="text-gray-700 dark:text-gray-300">{formatFileSize(asset.file_size_bytes)}</dd>
               </div>
               {asset.metadata?.width_px && asset.metadata.height_px && (
                 <div className="flex justify-between">
-                  <dt className="text-gray-400">Dimensions</dt>
-                  <dd className="text-gray-700">{asset.metadata.width_px} × {asset.metadata.height_px}</dd>
+                  <dt className="text-gray-400 dark:text-gray-500">Dimensions</dt>
+                  <dd className="text-gray-700 dark:text-gray-300">{asset.metadata.width_px} × {asset.metadata.height_px}</dd>
                 </div>
               )}
               {asset.metadata?.duration_seconds && (
                 <div className="flex justify-between">
-                  <dt className="text-gray-400">Duration</dt>
-                  <dd className="text-gray-700">{formatDuration(asset.metadata.duration_seconds)}</dd>
+                  <dt className="text-gray-400 dark:text-gray-500">Duration</dt>
+                  <dd className="text-gray-700 dark:text-gray-300">{formatDuration(asset.metadata.duration_seconds)}</dd>
                 </div>
               )}
             </dl>
@@ -301,48 +301,48 @@ export default function AssetDetailPage() {
           {/* Camera */}
           {asset.metadata && (asset.metadata.make || asset.metadata.model || asset.metadata.iso != null || asset.metadata.aperture != null) && (
             <section>
-              <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">Camera</h2>
+              <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">Camera</h2>
               <dl className="space-y-1 text-sm">
                 {asset.metadata.make && (
                   <div className="flex justify-between">
-                    <dt className="text-gray-400">Make</dt>
-                    <dd className="text-gray-700">{asset.metadata.make}</dd>
+                    <dt className="text-gray-400 dark:text-gray-500">Make</dt>
+                    <dd className="text-gray-700 dark:text-gray-300">{asset.metadata.make}</dd>
                   </div>
                 )}
                 {asset.metadata.model && (
                   <div className="flex justify-between">
-                    <dt className="text-gray-400">Model</dt>
-                    <dd className="text-gray-700">{asset.metadata.model}</dd>
+                    <dt className="text-gray-400 dark:text-gray-500">Model</dt>
+                    <dd className="text-gray-700 dark:text-gray-300">{asset.metadata.model}</dd>
                   </div>
                 )}
                 {asset.metadata.iso != null && (
                   <div className="flex justify-between">
-                    <dt className="text-gray-400">ISO</dt>
-                    <dd className="text-gray-700">{asset.metadata.iso}</dd>
+                    <dt className="text-gray-400 dark:text-gray-500">ISO</dt>
+                    <dd className="text-gray-700 dark:text-gray-300">{asset.metadata.iso}</dd>
                   </div>
                 )}
                 {asset.metadata.aperture != null && (
                   <div className="flex justify-between">
-                    <dt className="text-gray-400">Aperture</dt>
-                    <dd className="text-gray-700">f/{asset.metadata.aperture.toFixed(1)}</dd>
+                    <dt className="text-gray-400 dark:text-gray-500">Aperture</dt>
+                    <dd className="text-gray-700 dark:text-gray-300">f/{asset.metadata.aperture.toFixed(1)}</dd>
                   </div>
                 )}
                 {asset.metadata.shutter_speed != null && (
                   <div className="flex justify-between">
-                    <dt className="text-gray-400">Shutter</dt>
-                    <dd className="text-gray-700">{formatShutterSpeed(asset.metadata.shutter_speed)}</dd>
+                    <dt className="text-gray-400 dark:text-gray-500">Shutter</dt>
+                    <dd className="text-gray-700 dark:text-gray-300">{formatShutterSpeed(asset.metadata.shutter_speed)}</dd>
                   </div>
                 )}
                 {asset.metadata.focal_length != null && (
                   <div className="flex justify-between">
-                    <dt className="text-gray-400">Focal length</dt>
-                    <dd className="text-gray-700">{asset.metadata.focal_length.toFixed(0)} mm</dd>
+                    <dt className="text-gray-400 dark:text-gray-500">Focal length</dt>
+                    <dd className="text-gray-700 dark:text-gray-300">{asset.metadata.focal_length.toFixed(0)} mm</dd>
                   </div>
                 )}
                 {asset.metadata.flash != null && (
                   <div className="flex justify-between">
-                    <dt className="text-gray-400">Flash</dt>
-                    <dd className="text-gray-700">{asset.metadata.flash ? "Fired" : "No"}</dd>
+                    <dt className="text-gray-400 dark:text-gray-500">Flash</dt>
+                    <dd className="text-gray-700 dark:text-gray-300">{asset.metadata.flash ? "Fired" : "No"}</dd>
                   </div>
                 )}
               </dl>
@@ -352,16 +352,16 @@ export default function AssetDetailPage() {
           {/* Tags */}
           {asset.tags.length > 0 && (
             <section>
-              <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">Tags</h2>
+              <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">Tags</h2>
               <div className="flex flex-wrap gap-2">
                 {asset.tags.map((tag) => (
                   <span
                     key={tag.name}
-                    className="flex items-center gap-1 rounded-full bg-gray-100 px-3 py-1 text-xs text-gray-700"
+                    className="flex items-center gap-1 rounded-full bg-gray-100 px-3 py-1 text-xs text-gray-700 dark:bg-gray-700 dark:text-gray-300"
                   >
                     {tag.name}
                     {tag.source && (
-                      <span className="text-gray-400">· {tag.source.replace("google_", "")}</span>
+                      <span className="text-gray-400 dark:text-gray-500">· {tag.source.replace("google_", "")}</span>
                     )}
                   </span>
                 ))}
@@ -372,13 +372,13 @@ export default function AssetDetailPage() {
           {/* Location */}
           {asset.location && (
             <section>
-              <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">Location</h2>
+              <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">Location</h2>
               {(asset.location.display_name || asset.location.country) && (
-                <p className="mb-2 text-sm text-gray-700">
+                <p className="mb-2 text-sm text-gray-700 dark:text-gray-300">
                   {asset.location.display_name ?? asset.location.country}
                 </p>
               )}
-              <div className="overflow-hidden rounded border">
+              <div className="overflow-hidden rounded border border-gray-200 dark:border-gray-700">
                 <iframe
                   title="Map"
                   width="100%"
@@ -387,7 +387,7 @@ export default function AssetDetailPage() {
                   className="border-0"
                 />
               </div>
-              <dl className="mt-2 space-y-1 text-xs text-gray-400">
+              <dl className="mt-2 space-y-1 text-xs text-gray-400 dark:text-gray-500">
                 <div className="flex justify-between">
                   <dt>Coordinates</dt>
                   <dd>{asset.location.latitude.toFixed(5)}, {asset.location.longitude.toFixed(5)}</dd>
@@ -404,14 +404,14 @@ export default function AssetDetailPage() {
           {/* Albums */}
           {(albums.length > 0 || memberAlbums.length > 0) && (
             <section>
-              <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">Albums</h2>
+              <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">Albums</h2>
               {memberAlbums.length > 0 && (
                 <div className="mb-3 flex flex-wrap gap-1.5">
                   {memberAlbums.map((album) => (
                     <a
                       key={album.id}
                       href={`/albums/${album.id}`}
-                      className="rounded-full bg-gray-100 px-3 py-1 text-xs text-gray-700 hover:bg-gray-200"
+                      className="rounded-full bg-gray-100 px-3 py-1 text-xs text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
                     >
                       {album.title}
                     </a>
@@ -424,7 +424,7 @@ export default function AssetDetailPage() {
                     <select
                       value={selectedAlbumId}
                       onChange={(e) => setSelectedAlbumId(e.target.value)}
-                      className="flex-1 rounded border border-gray-200 bg-gray-50 px-2 py-1.5 text-sm text-gray-700 focus:border-gray-400 focus:outline-none"
+                      className="flex-1 rounded border border-gray-200 bg-gray-50 px-2 py-1.5 text-sm text-gray-700 focus:border-gray-400 focus:outline-none dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:focus:border-gray-500"
                     >
                       {albums.map((album) => (
                         <option key={album.id} value={album.id}>
@@ -435,13 +435,13 @@ export default function AssetDetailPage() {
                     <button
                       onClick={handleAddToAlbum}
                       disabled={adding || addedAlbumIds.has(selectedAlbumId)}
-                      className="rounded border border-gray-200 px-3 py-1.5 text-sm text-gray-700 hover:border-gray-400 disabled:opacity-40"
+                      className="rounded border border-gray-200 px-3 py-1.5 text-sm text-gray-700 hover:border-gray-400 disabled:opacity-40 dark:border-gray-600 dark:text-gray-300 dark:hover:border-gray-500"
                     >
                       {addedAlbumIds.has(selectedAlbumId) ? "Added" : adding ? "Adding…" : "Add"}
                     </button>
                   </div>
                   {addError && (
-                    <p className="mt-1 text-xs text-red-600">{addError}</p>
+                    <p className="mt-1 text-xs text-red-600 dark:text-red-400">{addError}</p>
                   )}
                 </>
               )}
