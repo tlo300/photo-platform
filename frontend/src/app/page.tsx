@@ -397,6 +397,8 @@ export default function Home() {
           undefined,
           undefined,
           filterType ?? undefined,
+          // These chips are toggles: off = no filter (undefined), on = true.
+          // We intentionally never send false — "exclude has-location" is not a use case.
           filterHasLocation || undefined,
           filterLiveOnly || undefined,
         );
@@ -426,6 +428,8 @@ export default function Home() {
           before,
           undefined,
           filterType ?? undefined,
+          // These chips are toggles: off = no filter (undefined), on = true.
+          // We intentionally never send false — "exclude has-location" is not a use case.
           filterHasLocation || undefined,
           filterLiveOnly || undefined,
         );
@@ -446,7 +450,9 @@ export default function Home() {
     [token, filterType, filterHasLocation, filterLiveOnly]
   );
 
-  // Track first render to avoid resetting the feed on mount.
+  // Guard against resetting the feed on the initial mount: the filter values from the URL
+  // are available on the first render, which would otherwise trigger a spurious reset before
+  // the initial fetchPage() fires (nextCursor === undefined → fetchPage handles that case).
   const isFirstFilterRender = useRef(true);
   useEffect(() => {
     if (isFirstFilterRender.current) {
@@ -595,6 +601,8 @@ export default function Home() {
         undefined,
         undefined,
         filterType ?? undefined,
+        // These chips are toggles: off = no filter (undefined), on = true.
+        // We intentionally never send false — "exclude has-location" is not a use case.
         filterHasLocation || undefined,
         filterLiveOnly || undefined,
       );
@@ -659,8 +667,8 @@ export default function Home() {
         />
       </div>
 
-      {/* Filter bar */}
-      <FilterBar filters={filters} onChange={handleFilterChange} />
+      {/* Filter bar — hidden while searching (search endpoint ignores these filters) */}
+      {!isSearching && <FilterBar filters={filters} onChange={handleFilterChange} />}
 
       {/* Content area — scroll container + scrubber side by side */}
       <div className="flex flex-1 overflow-hidden">
