@@ -66,6 +66,7 @@ class AssetItem(BaseModel):
 class PagedAssetResponse(BaseModel):
     items: list[AssetItem]
     next_cursor: str | None
+    prev_cursor: str | None = None
 
 
 class AssetMetadata(BaseModel):
@@ -167,6 +168,7 @@ def _thumbnail_url(user_id: uuid.UUID, asset_id: uuid.UUID, thumbnail_ready: boo
 async def list_assets(
     # Pagination
     cursor: str | None = Query(None, description="Opaque pagination cursor from a previous response"),
+    before: str | None = Query(None, description="Fetch items newer than this cursor (for upward pagination)"),
     limit: int = Query(_DEFAULT_PAGE_SIZE, ge=1, le=_MAX_PAGE_SIZE, description="Page size"),
     # Filters
     person: str | None = Query(None, description="Filter by person name (case-insensitive, google_people source)"),
@@ -290,8 +292,58 @@ async def list_assets(
         rows = list(await session.execute(stmt))
         page = rows
         next_cursor: str | None = None
+        prev_cursor: str | None = None
+    elif before is not None:
+        # Upward pagination — fetch items NEWER than the `before` cursor.
+        # Query in ascending order, take the first `limit` (closest to the cursor),
+        # then reverse to return results in the standard DESC order.
+        before_at, before_id = _decode_cursor(before)
+        if before_at is not None:
+            stmt = stmt.where(
+                or_(
+                    MediaAsset.captured_at > before_at,
+                    and_(
+                        MediaAsset.captured_at == before_at,
+                        MediaAsset.id > before_id,
+                    ),
+                )
+            )
+            # NULL captured_at items are the oldest and never come before a dated item.
+        else:
+            # Cursor is in the NULL section; newer items are non-null ones plus
+            # NULL items with a higher id (earlier in the DESC sequence).
+            stmt = stmt.where(
+                or_(
+                    MediaAsset.captured_at.isnot(None),
+                    and_(
+                        MediaAsset.captured_at.is_(None),
+                        MediaAsset.id > before_id,
+                    ),
+                )
+            )
+
+        stmt = (
+            stmt
+            .order_by(
+                MediaAsset.captured_at.asc().nulls_last(),
+                MediaAsset.id.asc(),
+            )
+            .limit(limit + 1)
+        )
+        rows = list(await session.execute(stmt))
+
+        has_prev = len(rows) > limit
+        # Reverse so the returned slice is in the standard newest-first order.
+        page = list(reversed(rows[:limit]))
+
+        next_cursor = None
+        prev_cursor = None
+        if has_prev:
+            # The first item after reversal is the newest in this batch.
+            first_asset, *_ = page[0]
+            prev_cursor = _encode_cursor(first_asset.captured_at, first_asset.id)
     else:
-        # Cursor — keyset pagination on (captured_at DESC NULLS LAST, id DESC).
+        # Downward cursor pagination on (captured_at DESC NULLS LAST, id DESC).
         # Three cases for the WHERE predicate:
         #   A) cursor has a non-null captured_at:
         #      rows where captured_at < cursor_at
@@ -338,6 +390,13 @@ async def list_assets(
             last_asset, *_ = page[-1]
             next_cursor = _encode_cursor(last_asset.captured_at, last_asset.id)
 
+        # prev_cursor: null on the first/latest page (already at the top).
+        # Set when a cursor or date_to was supplied so the client can scroll back up.
+        prev_cursor = None
+        if page and (cursor is not None or date_to is not None):
+            first_asset, *_ = page[0]
+            prev_cursor = _encode_cursor(first_asset.captured_at, first_asset.id)
+
     items = [
         AssetItem(
             id=asset.id,
@@ -354,7 +413,7 @@ async def list_assets(
         for asset, width_px, height_px, locality in page
     ]
 
-    return PagedAssetResponse(items=items, next_cursor=next_cursor)
+    return PagedAssetResponse(items=items, next_cursor=next_cursor, prev_cursor=prev_cursor)
 
 
 @router.get("/search", response_model=PagedAssetResponse)
