@@ -12,6 +12,7 @@ import {
   getAlbumAssets,
   removeAssetFromAlbum,
   updateAlbumHidden,
+  updateAlbumCover,
   AlbumItem,
   AlbumAssetItem,
   AssetItem,
@@ -120,13 +121,19 @@ function JustifiedRow({
   containerWidth,
   token,
   removing,
+  settingCover,
+  coverAssetId,
   onRemove,
+  onSetCover,
 }: {
   row: AssetRow;
   containerWidth: number;
   token: string;
   removing: string | null;
+  settingCover: boolean;
+  coverAssetId: string | null;
   onRemove: (id: string) => void;
+  onSetCover: (id: string) => void;
 }) {
   const dims = justifyRow(row.assets, containerWidth, TARGET_ROW_HEIGHT, row.isPartial);
   return (
@@ -144,6 +151,33 @@ function JustifiedRow({
             token={token}
             onClick={() => {}}
           />
+          {/* Cover indicator */}
+          {asset.id === coverAssetId && (
+            <div className="pointer-events-none absolute left-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-white">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5">
+                <path fillRule="evenodd" d="M10.868 2.884c-.321-.772-1.415-.772-1.736 0l-1.83 4.401-4.753.381c-.833.067-1.171 1.107-.536 1.651l3.62 3.102-1.106 4.637c-.194.813.691 1.456 1.405 1.02L10 15.591l4.069 2.485c.713.436 1.598-.207 1.404-1.02l-1.106-4.637 3.62-3.102c.635-.544.297-1.584-.536-1.65l-4.752-.382-1.83-4.402Z" clipRule="evenodd" />
+              </svg>
+            </div>
+          )}
+          {/* Set as cover button — visible on hover, hidden when already cover */}
+          {asset.id !== coverAssetId && (
+            <button
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onSetCover(asset.id);
+              }}
+              disabled={settingCover}
+              className="absolute left-1.5 top-1.5 flex h-7 w-7 items-center justify-center rounded-full bg-black/60 text-white opacity-0 transition-opacity group-hover:opacity-100 hover:bg-black/80 disabled:cursor-not-allowed"
+              title="Set as album cover"
+              aria-label="Set as album cover"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5">
+                <path fillRule="evenodd" d="M10.868 2.884c-.321-.772-1.415-.772-1.736 0l-1.83 4.401-4.753.381c-.833.067-1.171 1.107-.536 1.651l3.62 3.102-1.106 4.637c-.194.813.691 1.456 1.405 1.02L10 15.591l4.069 2.485c.713.436 1.598-.207 1.404-1.02l-1.106-4.637 3.62-3.102c.635-.544.297-1.584-.536-1.65l-4.752-.382-1.83-4.402Z" clipRule="evenodd" />
+              </svg>
+            </button>
+          )}
+          {/* Remove from album button */}
           <button
             onClick={(e) => {
               e.preventDefault();
@@ -176,13 +210,19 @@ function DaySection({
   containerWidth,
   token,
   removing,
+  settingCover,
+  coverAssetId,
   onRemove,
+  onSetCover,
 }: {
   group: DayGroup;
   containerWidth: number;
   token: string;
   removing: string | null;
+  settingCover: boolean;
+  coverAssetId: string | null;
   onRemove: (id: string) => void;
+  onSetCover: (id: string) => void;
 }) {
   const rows = buildRows(group.assets, containerWidth, TARGET_ROW_HEIGHT);
   return (
@@ -201,7 +241,10 @@ function DaySection({
             containerWidth={containerWidth}
             token={token}
             removing={removing}
+            settingCover={settingCover}
+            coverAssetId={coverAssetId}
             onRemove={onRemove}
+            onSetCover={onSetCover}
           />
         ))}
       </div>
@@ -223,6 +266,7 @@ export default function AlbumDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
   const [togglingHidden, setTogglingHidden] = useState(false);
+  const [settingCover, setSettingCover] = useState(false);
   const [containerWidth, setContainerWidth] = useState(0);
 
   const gridRef = useRef<HTMLDivElement>(null);
@@ -278,6 +322,19 @@ export default function AlbumDetailPage() {
       setError(e instanceof Error ? e.message : "Failed to update album");
     } finally {
       setTogglingHidden(false);
+    }
+  }
+
+  async function handleSetCover(assetId: string) {
+    if (!token || !album || settingCover) return;
+    setSettingCover(true);
+    try {
+      const updated = await updateAlbumCover(token, albumId, assetId);
+      setAlbum(updated);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to set cover photo");
+    } finally {
+      setSettingCover(false);
     }
   }
 
@@ -375,7 +432,10 @@ export default function AlbumDetailPage() {
             containerWidth={containerWidth}
             token={token}
             removing={removing}
+            settingCover={settingCover}
+            coverAssetId={album?.cover_asset_id ?? null}
             onRemove={handleRemove}
+            onSetCover={handleSetCover}
           />
         ))}
       </div>
