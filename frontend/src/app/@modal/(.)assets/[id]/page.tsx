@@ -20,7 +20,7 @@ export default function PhotoModal() {
   }, [router]);
 
   return (
-    <div className="fixed inset-0 z-50">
+    <div className="fixed inset-0 z-[1000]">
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/80"

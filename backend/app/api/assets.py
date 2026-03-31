@@ -3,10 +3,10 @@
 Endpoints:
   GET /assets               — paginated timeline ordered by captured_at DESC, id DESC.
                               Optional filters: person, date_from, date_to, media_type, has_location,
-                              near (lat,lon), radius_km.
+                              near (lat,lon), radius_km, bbox (minLon,minLat,maxLon,maxLat).
                               Cursor-based pagination; each response includes a next_cursor field.
-                              When near is specified, results are ordered by distance and next_cursor
-                              is always null (no cursor pagination for geo queries).
+                              When near or bbox is specified, results are ordered by captured_at DESC
+                              and next_cursor is always null (no cursor pagination for geo queries).
   GET /assets/search        — full-text search across description, tag names, locality, and camera
                               make/model. Ordered by relevance then captured_at DESC. Empty q returns
                               first page.
@@ -21,7 +21,7 @@ from datetime import datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
-from geoalchemy2.functions import ST_X, ST_Y
+from geoalchemy2.functions import ST_MakeEnvelope, ST_Within, ST_X, ST_Y
 from geoalchemy2.types import Geography
 from pydantic import BaseModel
 from sqlalchemy import and_, cast, exists, func, or_, select
@@ -178,6 +178,7 @@ async def list_assets(
     has_location: bool | None = Query(None, description="True = only assets with GPS; False = only without"),
     near: str | None = Query(None, description="lat,lon centre for proximity filter (e.g. 52.37,4.89)"),
     radius_km: float = Query(10.0, ge=0.1, le=5000.0, description="Search radius in km (requires near)"),
+    bbox: str | None = Query(None, description="Bounding box filter: minLon,minLat,maxLon,maxLat"),
     # Dependencies
     user_id: uuid.UUID = Depends(get_current_user),
     session: AsyncSession = Depends(get_authed_session),
@@ -255,6 +256,39 @@ async def list_assets(
         )
     )
 
+    # Validate mutual exclusivity of geo filters.
+    if near is not None and bbox is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="near and bbox cannot be used together.",
+        )
+
+    # Bounding-box filter — inner-joins Location and filters by ST_Within.
+    # Cursor pagination is bypassed; results ordered by captured_at DESC.
+    _bbox_active = False
+    if bbox is not None:
+        try:
+            min_lon_s, min_lat_s, max_lon_s, max_lat_s = bbox.split(",", 3)
+            _min_lon = float(min_lon_s.strip())
+            _min_lat = float(min_lat_s.strip())
+            _max_lon = float(max_lon_s.strip())
+            _max_lat = float(max_lat_s.strip())
+            if not (-180 <= _min_lon <= 180 and -180 <= _max_lon <= 180
+                    and -90 <= _min_lat <= 90 and -90 <= _max_lat <= 90):
+                raise ValueError
+        except (ValueError, AttributeError):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="bbox must be minLon,minLat,maxLon,maxLat.",
+            )
+        _envelope = ST_MakeEnvelope(_min_lon, _min_lat, _max_lon, _max_lat, 4326)
+        stmt = (
+            stmt
+            .join(Location, Location.asset_id == MediaAsset.id)
+            .where(ST_Within(Location.point, _envelope))
+        )
+        _bbox_active = True
+
     # Proximity filter — joins locations and filters by ST_DWithin (geography metres).
     # When active, cursor pagination is bypassed and results are ordered by distance.
     # When active, Location is inner-joined (assets without GPS are excluded naturally).
@@ -282,7 +316,7 @@ async def list_assets(
             .join(Location, Location.asset_id == MediaAsset.id)
             .where(func.ST_DWithin(_point_geog, _near_geog, radius_km * 1000))
         )
-    else:
+    elif not _bbox_active:
         # Outerjoin Location so locality is populated for all assets.
         stmt = stmt.outerjoin(Location, Location.asset_id == MediaAsset.id)
 
@@ -293,6 +327,16 @@ async def list_assets(
         page = rows
         next_cursor: str | None = None
         prev_cursor: str | None = None
+    elif _bbox_active:
+        # Bbox filter — no cursor pagination; captured_at DESC ordering.
+        stmt = stmt.order_by(
+            MediaAsset.captured_at.desc().nulls_last(),
+            MediaAsset.id.desc(),
+        ).limit(limit)
+        rows = list(await session.execute(stmt))
+        page = rows
+        next_cursor = None
+        prev_cursor = None
     elif before is not None:
         # Upward pagination — fetch items NEWER than the `before` cursor.
         # Query in ascending order, take the first `limit` (closest to the cursor),

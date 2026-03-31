@@ -8,7 +8,7 @@ const CSP = [
   "default-src 'self'",
   "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' blob: data:",
+  "img-src 'self' blob: data: https://*.tile.openstreetmap.org",
   "font-src 'self'",
   "connect-src 'self'",
   "frame-src https://www.openstreetmap.org",

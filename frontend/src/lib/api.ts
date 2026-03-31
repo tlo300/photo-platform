@@ -393,6 +393,43 @@ export interface AssetDetail {
   tags: AssetTagItem[];
 }
 
+export interface MapPoint {
+  id: string;
+  lat: number;
+  lon: number;
+}
+
+export async function getMapPoints(token: string): Promise<MapPoint[]> {
+  const res = await fetch(`${CLIENT_API_URL}/map/points`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error((data as { detail?: string }).detail ?? "Failed to load map points");
+  }
+  return res.json();
+}
+
+export async function getAssetsInBbox(
+  token: string,
+  minLon: number,
+  minLat: number,
+  maxLon: number,
+  maxLat: number,
+  limit = 100
+): Promise<AssetsPage> {
+  const bbox = `${minLon},${minLat},${maxLon},${maxLat}`;
+  const params = new URLSearchParams({ bbox, limit: String(limit) });
+  const res = await fetch(`${CLIENT_API_URL}/assets?${params}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error((data as { detail?: string }).detail ?? "Failed to load assets");
+  }
+  return res.json();
+}
+
 export async function getAssetYears(token: string): Promise<number[]> {
   const res = await fetch(`${CLIENT_API_URL}/assets/years`, {
     headers: { Authorization: `Bearer ${token}` },

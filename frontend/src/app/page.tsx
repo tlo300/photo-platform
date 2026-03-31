@@ -572,6 +572,9 @@ export default function Home() {
           <Link href="/albums" className="text-sm text-gray-500 hover:text-gray-900">
             Albums
           </Link>
+          <Link href="/map" className="text-sm text-gray-500 hover:text-gray-900">
+            Map
+          </Link>
           <button
             onClick={async () => { await logout(); router.push("/login"); }}
             className="text-sm text-gray-500 hover:text-gray-900"
