@@ -40,9 +40,10 @@ _GOOGLE_PEOPLE_SOURCE = "google_people"
 _DEFAULT_PAGE_SIZE = 50
 _MAX_PAGE_SIZE = 200
 
-# Thumbnail key convention: {user_id}/thumbnails/{asset_id}/thumb.webp
-# Matches the path written by the thumbnail worker (issue #23).
+# Thumbnail key convention — must match paths written by the thumbnail worker.
 _THUMBNAIL_KEY_TEMPLATE = "{user_id}/thumbnails/{asset_id}/thumb.webp"
+_DISPLAY_KEY_TEMPLATE = "{user_id}/thumbnails/{asset_id}/display.webp"
+_HEIC_MIMES = {"image/heic", "image/heif"}
 
 
 # ---------------------------------------------------------------------------
@@ -104,6 +105,7 @@ class AssetDetail(BaseModel):
     description: str | None
     full_url: str
     thumbnail_url: str | None
+    display_url: str | None
     metadata: AssetMetadata | None
     location: AssetLocation | None
     tags: list[AssetTagItem]
@@ -145,7 +147,7 @@ def _decode_cursor(cursor: str) -> tuple[datetime | None, uuid.UUID]:
 
 
 def _thumbnail_url(user_id: uuid.UUID, asset_id: uuid.UUID, thumbnail_ready: bool) -> str | None:
-    """Return a presigned URL for the asset's thumbnail.
+    """Return a presigned URL for the asset's thumbnail (320×320).
 
     Returns None when the thumbnail has not been generated yet (thumbnail_ready=False)
     or if the presigned URL cannot be created.
@@ -153,6 +155,23 @@ def _thumbnail_url(user_id: uuid.UUID, asset_id: uuid.UUID, thumbnail_ready: boo
     if not thumbnail_ready:
         return None
     key = _THUMBNAIL_KEY_TEMPLATE.format(user_id=user_id, asset_id=asset_id)
+    try:
+        return storage_service.generate_presigned_url(str(user_id), key)
+    except StorageError:
+        return None
+
+
+def _display_url(
+    user_id: uuid.UUID, asset_id: uuid.UUID, mime_type: str, thumbnail_ready: bool
+) -> str | None:
+    """Return a presigned URL for the full-resolution display WebP.
+
+    Only generated for HEIC/HEIF assets (browsers cannot render HEIC natively).
+    Returns None for all other mime types, or when thumbnail_ready is False.
+    """
+    if mime_type not in _HEIC_MIMES or not thumbnail_ready:
+        return None
+    key = _DISPLAY_KEY_TEMPLATE.format(user_id=user_id, asset_id=asset_id)
     try:
         return storage_service.generate_presigned_url(str(user_id), key)
     except StorageError:
@@ -641,6 +660,7 @@ async def get_asset(
         description=asset.description,
         full_url=full_url,
         thumbnail_url=_thumbnail_url(user_id, asset.id, asset.thumbnail_ready),
+        display_url=_display_url(user_id, asset.id, asset.mime_type, asset.thumbnail_ready),
         metadata=AssetMetadata(
             make=meta.make,
             model=meta.model,

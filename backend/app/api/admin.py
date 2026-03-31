@@ -548,6 +548,48 @@ async def backfill_live_photos(
 
 
 # ---------------------------------------------------------------------------
+# POST /admin/backfill-display-webp
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/backfill-display-webp",
+    response_model=BackfillMetadataResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def backfill_display_webp(
+    user_id: uuid.UUID | None = Query(
+        default=None,
+        description="Limit backfill to a specific user. Omit to run for all users.",
+    ),
+    admin_id: uuid.UUID = Depends(get_admin_user),
+    session: AsyncSession = Depends(get_session),
+) -> BackfillMetadataResponse:
+    """Generate full-resolution display.webp for existing HEIC/HEIF assets.
+
+    Dispatches one thumbnails.backfill_display_webp_user Celery task per user.
+    Each task downloads the original HEIC, converts it to a full-resolution WebP,
+    and stores it alongside the existing thumb/preview.  Idempotent — safe to re-run.
+    Returns the number of user-level tasks enqueued.
+    """
+    from app.worker.thumbnail_tasks import backfill_display_webp_user
+
+    if user_id is not None:
+        user = await session.scalar(select(User).where(User.id == user_id))
+        if user is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
+        user_ids = [user_id]
+    else:
+        rows = await session.scalars(select(User.id))
+        user_ids = list(rows)
+
+    for uid in user_ids:
+        backfill_display_webp_user.delay(str(uid))
+
+    return BackfillMetadataResponse(enqueued=len(user_ids))
+
+
+# ---------------------------------------------------------------------------
 # POST /admin/backfill-geocode
 # ---------------------------------------------------------------------------
 
