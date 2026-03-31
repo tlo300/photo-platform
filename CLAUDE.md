@@ -79,10 +79,24 @@ Update this section at the end of every working session.
 
 ```
 Active milestone : Extra Requirements
-Last completed  : 2026-03-31 map heatmap view — PR #167 (open)
+Last completed  : 2026-03-31 light/dark mode toggle — PR #168 (merged)
 In progress     : (none)
 Blocked         : (none)
 ```
+
+### Handoff — 2026-03-31 (Light/dark mode toggle — PR #168)
+**Completed:**
+- `frontend/src/app/globals.css`: added `@custom-variant dark (&:where(.dark, .dark *))` for Tailwind v4 class-based dark mode
+- `frontend/src/context/ThemeContext.tsx`: new context — manages `light | dark` state, reads `localStorage` on mount, falls back to `prefers-color-scheme`, applies/removes `dark` class on `<html>`
+- `frontend/src/components/ThemeToggle.tsx`: new sun/moon icon button component
+- `frontend/src/app/layout.tsx`: wraps app with `<ThemeProvider>`; inline `<script>` in `<head>` sets `dark` class before React hydrates (prevents flash of wrong theme); `suppressHydrationWarning` on `<html>`
+- All 13 pages updated with Tailwind `dark:` variants for backgrounds, text, borders, inputs, buttons, error/success states
+- `ThemeToggle` placed in home page nav and top-right of auth pages (login, register, invite)
+
+**Gotchas:**
+- Tailwind v4 requires explicit `@custom-variant dark` declaration — there is no `darkMode: 'class'` config file like v3
+- The inline script must run before React hydrates to avoid flash; `suppressHydrationWarning` on `<html>` suppresses the React mismatch warning caused by the class being set by the script before hydration
+- Black primary buttons invert in dark mode: `dark:bg-white dark:text-gray-900` — not `dark:bg-gray-800`
 
 ### Handoff — 2026-03-31 (Map heatmap view — PR #167)
 **Completed:**
