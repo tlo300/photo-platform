@@ -79,10 +79,21 @@ Update this section at the end of every working session.
 
 ```
 Active milestone : Extra Requirements
-Last completed  : 2026-04-01 Video badge on thumbnails — PR #181
+Last completed  : 2026-04-01 Rename person from detail page — PR #182
 In progress     : (none)
 Blocked         : (none)
 ```
+
+### Handoff — 2026-04-01 (Rename person from detail page — PR #182)
+**Completed:**
+- `backend/app/api/people.py`: added `PATCH /people/{id}` endpoint — strips whitespace, 422 if blank, 404 if not found (RLS + explicit `owner_id` filter), 409 on unique constraint violation, returns `{id, name}`
+- `backend/tests/test_rename_person.py`: 6 integration tests (happy path, 404, 409, 422, RLS isolation, unauthenticated); `user_ids` fixture uses email LIKE patterns instead of fragile `ORDER BY created_at`
+- `frontend/src/lib/api.ts`: `renamePerson(token, id, name)` — PATCH with 409-specific error message
+- `frontend/src/app/people/[id]/page.tsx`: `personName` state for optimistic updates; `RenameModal` component (autoFocus, Enter/Escape, inline errors, disabled Save while saving); pencil icon button shown after person loads; `handleRename` keeps modal mounted throughout — only closes on success so error messages display correctly
+
+**Gotchas:**
+- Do NOT close the modal before the API call resolves — if you close then reopen on failure, React unmounts/remounts the component and the error state is lost
+- `user_ids` test fixture must use email LIKE patterns, not `ORDER BY created_at DESC`, to avoid flakiness when multiple test modules share the DB
 
 ### Handoff — 2026-04-01 (Video badge on thumbnails — PR #181)
 **Completed:**
