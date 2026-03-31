@@ -263,14 +263,17 @@ async def list_assets(
     elif media_type == "video":
         stmt = stmt.where(MediaAsset.mime_type.like("video/%"))
 
-    # Location filter
+    # Location filter — use a table alias so SQLAlchemy's auto-correlation does not remove
+    # 'locations' from the EXISTS subquery's FROM clause (which it would if we referenced
+    # Location directly, since Location is also outjoined in the outer query).
+    _loc_exists = Location.__table__.alias("_loc_exists")
     if has_location is True:
         stmt = stmt.where(
-            exists().where(Location.asset_id == MediaAsset.id)
+            exists().where(_loc_exists.c.asset_id == MediaAsset.id)
         )
     elif has_location is False:
         stmt = stmt.where(
-            ~exists().where(Location.asset_id == MediaAsset.id)
+            ~exists().where(_loc_exists.c.asset_id == MediaAsset.id)
         )
 
     # Live photo filter
