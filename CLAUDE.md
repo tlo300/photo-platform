@@ -79,10 +79,22 @@ Update this section at the end of every working session.
 
 ```
 Active milestone : Extra Requirements
-Last completed  : 2026-03-31 fix year scrubber scroll — PR #155 (merged)
+Last completed  : 2026-03-31 bidirectional infinite scroll — PR #164 (open)
 In progress     : (none)
 Blocked         : (none)
 ```
+
+### Handoff — 2026-03-31 (#144 Bidirectional infinite scroll — PR #164)
+**Completed:**
+- `backend/app/api/assets.py`: new `before: str | None` query param on `GET /assets` — fetches items NEWER than the cursor by querying in ASC order, taking the `limit` items closest to the cursor, then reversing to DESC; added `prev_cursor: str | None` to `PagedAssetResponse` (null on the initial page, `encode(items[0])` when `cursor` or `date_to` was used)
+- `frontend/src/lib/api.ts`: `AssetsPage` gains `prev_cursor: string | null`; `getAssets()` gains optional `before` param
+- `frontend/src/app/page.tsx`: `prevCursor` state, `topSentinelRef` + top IntersectionObserver that fires `fetchPrevPage`; `fetchPrevPage` snapshots `{scrollTop, scrollHeight}` into `scrollAnchor` before calling `setItems`; `useLayoutEffect([items])` compensates `scrollTop` by the height delta so the viewport doesn't jump when content is prepended; `handleYearClick` now stores `page.prev_cursor`
+
+**Gotchas:**
+- `scrollAnchor` must be set synchronously before `setItems` (in the same microtask after the `await`) so the snapshot reflects the pre-render DOM; `useLayoutEffect` fires after commit but before paint, making the adjustment invisible to the user
+- `useLayoutEffect([items])` handles both cases (prepend anchor and year-jump selector) — the anchor check comes first and returns early so the two paths don't conflict
+- `prev_cursor` is null for the initial fetch (no cursor, no date_to) — the top sentinel fires but `prevCursor && !loading` guards the call so no spurious request is made
+- The `before` branch uses `ASC NULLS LAST` ordering so non-null dates come first (oldest-to-newest within the newer-than-cursor set), then the slice is reversed; `has_prev = len(rows) > limit` detects whether even newer items exist
 
 ### Handoff — 2026-03-31 (Fix year scrubber scroll — fix/year-scrubber-scroll)
 **Completed:**
