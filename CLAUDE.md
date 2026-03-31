@@ -79,10 +79,25 @@ Update this section at the end of every working session.
 
 ```
 Active milestone : Extra Requirements
-Last completed  : 2026-03-31 map heatmap view — PR #167 (open)
+Last completed  : 2026-03-31 light/dark mode toggle — PR #168 (merged)
 In progress     : (none)
 Blocked         : (none)
 ```
+
+### Handoff — 2026-03-31 (Light/dark mode toggle — PR #168)
+**Completed:**
+- `frontend/src/app/globals.css`: added `@custom-variant dark (&:where(.dark, .dark *))` — required for Tailwind v4 class-based dark mode (v3 used `darkMode: 'class'` in tailwind.config instead)
+- `frontend/src/context/ThemeContext.tsx` (new): React context providing `theme` + `toggleTheme`; reads localStorage on mount with OS `prefers-color-scheme` fallback; toggles `dark` class on `<html>` and persists to localStorage
+- `frontend/src/components/ThemeToggle.tsx` (new): sun/moon icon button — sun shown in dark mode to switch to light, moon shown in light mode to switch to dark
+- `frontend/src/app/layout.tsx`: wrapped tree in `<ThemeProvider>`; added inline blocking `<script>` in `<head>` to set `dark` class before React hydrates (prevents flash of wrong theme); `suppressHydrationWarning` on `<html>` to silence React's class mismatch warning
+- Applied `dark:` variants to all color classes across all 13 pages/components: `page.tsx`, `login/page.tsx`, `register/page.tsx`, `invite/[token]/page.tsx`, `assets/[id]/page.tsx`, `albums/page.tsx`, `albums/[id]/page.tsx`, `upload/page.tsx`, `import/page.tsx`, `map/page.tsx`, `@modal/(.)assets/[id]/page.tsx`, `admin/invitations/page.tsx`, `components/MediaCard.tsx`
+- `ThemeToggle` placed in every page nav; auth pages use `absolute right-4 top-4` positioning
+
+**Gotchas:**
+- Tailwind v4 dark mode: `@custom-variant dark (...)` in globals.css is the only config needed — no `tailwind.config` change
+- Black primary buttons invert in dark mode: `bg-black dark:bg-white text-white dark:text-gray-900` — not dark gray, to maintain contrast
+- The anti-flash inline script must be a blocking (non-async, non-deferred) `<script>` in `<head>` — if moved to body or made async, the dark class arrives after paint and causes a flash
+- `suppressHydrationWarning` on `<html>` only suppresses the `class` attribute mismatch (set by the inline script before hydration) — it does not suppress mismatches in child components
 
 ### Handoff — 2026-03-31 (Map heatmap view — PR #167)
 **Completed:**
