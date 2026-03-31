@@ -7,7 +7,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
-import { getAssets, listPeople, AssetItem, PersonItem } from "@/lib/api";
+import { getAssets, listPeople, renamePerson, AssetItem, PersonItem } from "@/lib/api";
 import { MediaCard } from "@/components/MediaCard";
 
 // ─── Layout constants ──────────────────────────────────────────────────────────
@@ -166,6 +166,74 @@ function DaySection({
   );
 }
 
+// ─── Rename modal ──────────────────────────────────────────────────────────────
+
+function RenameModal({
+  currentName,
+  onSave,
+  onClose,
+}: {
+  currentName: string;
+  onSave: (name: string) => Promise<string | null>;
+  onClose: () => void;
+}) {
+  const [value, setValue] = useState(currentName);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      setError("Name cannot be empty");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    const err = await onSave(trimmed);
+    setSaving(false);
+    if (err) setError(err);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <div className="w-full max-w-sm rounded-lg bg-white p-6 shadow-xl dark:bg-gray-800">
+        <h2 className="mb-4 text-base font-semibold text-gray-900 dark:text-gray-100">
+          Rename person
+        </h2>
+        <input
+          autoFocus
+          type="text"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") handleSave();
+            if (e.key === "Escape") onClose();
+          }}
+          className="w-full rounded border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+        />
+        {error && (
+          <p className="mt-2 text-xs text-red-600 dark:text-red-400">{error}</p>
+        )}
+        <div className="mt-4 flex justify-end gap-2">
+          <button
+            onClick={onClose}
+            className="rounded px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="rounded bg-black px-3 py-1.5 text-sm text-white hover:bg-gray-800 disabled:opacity-50 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-200"
+          >
+            {saving ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Page ──────────────────────────────────────────────────────────────────────
 
 export default function PersonPage() {
@@ -175,6 +243,8 @@ export default function PersonPage() {
   const personId = params.id;
 
   const [person, setPerson] = useState<PersonItem | null>(null);
+  const [personName, setPersonName] = useState<string>("");
+  const [showRenameModal, setShowRenameModal] = useState(false);
   const [items, setItems] = useState<AssetItem[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -210,7 +280,9 @@ export default function PersonPage() {
       getAssets(token, undefined, 50, undefined, undefined, personId),
     ])
       .then(([people, page]) => {
-        setPerson(people.find((p) => p.id === personId) ?? null);
+        const found = people.find((p) => p.id === personId) ?? null;
+        setPerson(found);
+        setPersonName(found?.name ?? "");
         setItems(page.items);
         setNextCursor(page.next_cursor);
       })
@@ -244,6 +316,23 @@ export default function PersonPage() {
     return () => obs.disconnect();
   }, [loadMore]);
 
+  // Optimistic rename: update name immediately, revert on error.
+  // Returns null on success, error message string on failure.
+  const handleRename = async (newName: string): Promise<string | null> => {
+    if (!token) return "Not authenticated";
+    const previousName = personName;
+    setPersonName(newName);
+    setShowRenameModal(false);
+    try {
+      await renamePerson(token, personId, newName);
+      return null;
+    } catch (e) {
+      setPersonName(previousName);
+      setShowRenameModal(true);
+      return e instanceof Error ? e.message : "Something went wrong, please try again";
+    }
+  };
+
   if (!ready || !token) return null;
 
   const dayGroups = groupByDay(items);
@@ -262,15 +351,37 @@ export default function PersonPage() {
           </svg>
           People
         </Link>
-        <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-          {person?.name ?? "Person"}
-        </h1>
+        <div className="flex items-center gap-1">
+          <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+            {personName || person?.name || "Person"}
+          </h1>
+          {person && (
+            <button
+              onClick={() => setShowRenameModal(true)}
+              className="ml-1 rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-500 dark:hover:bg-gray-800 dark:hover:text-gray-300"
+              title="Rename person"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                <path d="M2.695 14.763l-1.262 3.154a.5.5 0 0 0 .65.65l3.155-1.262a4 4 0 0 0 1.343-.885L17.5 5.5a2.121 2.121 0 0 0-3-3L3.58 13.42a4 4 0 0 0-.885 1.343Z" />
+              </svg>
+            </button>
+          )}
+        </div>
         {!loading && (
           <span className="text-sm text-gray-400 dark:text-gray-500">
             {photoCount} {photoCount === 1 ? "photo" : "photos"}
           </span>
         )}
       </div>
+
+      {/* Rename modal */}
+      {showRenameModal && (
+        <RenameModal
+          currentName={personName}
+          onSave={handleRename}
+          onClose={() => setShowRenameModal(false)}
+        />
+      )}
 
       {/* States */}
       {error && (
