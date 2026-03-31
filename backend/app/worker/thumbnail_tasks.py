@@ -26,7 +26,7 @@ import uuid
 
 from celery.exceptions import MaxRetriesExceededError
 from PIL import Image
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.config import settings
