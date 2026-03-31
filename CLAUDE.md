@@ -79,10 +79,14 @@ Update this section at the end of every working session.
 
 ```
 Active milestone : Extra Requirements
-Last completed  : 2026-04-01 Fix has_location filter 500 — PR #179
+Last completed  : 2026-04-01 Video badge on thumbnails — PR #181
 In progress     : (none)
 Blocked         : (none)
 ```
+
+### Handoff — 2026-04-01 (Video badge on thumbnails — PR #181)
+**Completed:**
+- `frontend/src/components/MediaCard.tsx`: added `▶ VIDEO` badge (blue `bg-blue-600/60`) for non-live-photo videos, mirroring the existing `▶ LIVE` badge pattern; mutually exclusive with LIVE badge
 
 ### Handoff — 2026-04-01 (Fix has_location filter 500 — PR #179)
 **Completed:**
