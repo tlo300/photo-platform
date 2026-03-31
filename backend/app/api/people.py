@@ -12,9 +12,10 @@ Endpoints:
 
 import uuid
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import and_, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import get_current_user
@@ -39,6 +40,15 @@ class PersonItem(BaseModel):
     name: str
     photo_count: int
     cover_thumbnail_url: str | None
+
+
+class RenamePersonRequest(BaseModel):
+    name: str
+
+
+class RenamePersonResponse(BaseModel):
+    id: uuid.UUID
+    name: str
 
 
 # ---------------------------------------------------------------------------
@@ -123,3 +133,37 @@ async def list_people(
         )
 
     return result
+
+
+@router.patch("/{person_id}", response_model=RenamePersonResponse)
+async def rename_person(
+    person_id: uuid.UUID,
+    body: RenamePersonRequest,
+    user_id: uuid.UUID = Depends(get_current_user),
+    session: AsyncSession = Depends(get_authed_session),
+) -> RenamePersonResponse:
+    """Rename a person (update Tag.name).
+
+    RLS ensures only the owner can see and update the tag.
+    Returns 404 if not found, 409 if the new name is already taken,
+    422 if the name is blank.
+    """
+    new_name = body.name.strip()
+    if not new_name:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Name cannot be empty")
+
+    result = await session.execute(
+        select(Tag).where(Tag.id == person_id, Tag.owner_id == user_id)
+    )
+    tag = result.scalar_one_or_none()
+    if tag is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Person not found")
+
+    tag.name = new_name
+    try:
+        await session.commit()
+    except IntegrityError:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="A person with that name already exists")
+
+    return RenamePersonResponse(id=tag.id, name=tag.name)
