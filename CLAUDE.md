@@ -79,10 +79,27 @@ Update this section at the end of every working session.
 
 ```
 Active milestone : Extra Requirements
-Last completed  : 2026-03-31 HEIC full-resolution detail view — PR #173 (open)
+Last completed  : 2026-03-31 People page — PR #174 (merged)
 In progress     : (none)
 Blocked         : (none)
 ```
+
+### Handoff — 2026-03-31 (People page — PR #174)
+**Completed:**
+- `backend/app/api/people.py`: new `GET /people` endpoint — lists all google_people tags with photo count and cover thumbnail URL (DISTINCT ON tag_id ordered by captured_at DESC for cover); two-query approach: count + cover batch
+- `backend/app/api/assets.py`: added `person_id: UUID` query param to `GET /assets` — joins AssetTag+Tag by UUID, takes precedence over existing `person` name filter when both supplied
+- `backend/app/main.py`: registered `people_router`
+- `backend/app/worker/upload_tasks.py`: `apply_sidecar` now called in all three ingest paths — new assets (inside savepoint), checksum duplicates (dedup path), and retroactive filename-matched path; geocoding updated to prefer sidecar GPS over EXIF GPS
+- `frontend/src/lib/api.ts`: `PersonItem` interface, `listPeople()`, `personId` param on `getAssets()`
+- `frontend/src/app/people/page.tsx`: circular avatar grid, alphabetical, empty state explains Takeout import requirement
+- `frontend/src/app/people/[id]/page.tsx`: justified day-grouped grid with cursor-based infinite scroll; fetches person info from `listPeople` on mount
+- `frontend/src/app/page.tsx`: People nav link added between Albums and Map
+
+**Gotchas:**
+- `google_metadata_raw` was empty (0 rows) despite 22k assets — all photos were imported before or via paths that never called `apply_sidecar`; people data only comes through on fresh folder re-uploads now that the fix is in
+- Folder upload path previously called `parse_sidecar` for dates but never `apply_sidecar` — only the Takeout zip path did; now fixed for all three paths
+- DISTINCT ON requires the ORDER BY to include the DISTINCT column first (`tag_id, captured_at DESC`) — cannot use `.order_by(captured_at DESC)` alone with `.distinct(tag_id)`
+- Route uses tag UUID (`/people/[id]`) not name to avoid URL encoding issues with names containing spaces, accents, apostrophes
 
 ### Handoff — 2026-03-31 (HEIC full-resolution detail view — PR #173)
 **Completed:**
