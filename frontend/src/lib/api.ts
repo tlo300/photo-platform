@@ -666,6 +666,27 @@ export async function listPeople(token: string): Promise<PersonItem[]> {
   return res.json();
 }
 
+export async function renamePerson(
+  token: string,
+  id: string,
+  name: string
+): Promise<{ id: string; name: string }> {
+  const res = await fetch(`${CLIENT_API_URL}/people/${id}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 409) throw new Error("A person with that name already exists");
+    throw new Error((data as { detail?: string }).detail ?? "Failed to rename person");
+  }
+  return res.json();
+}
+
 export async function createInvitation(
   token: string,
   email: string
