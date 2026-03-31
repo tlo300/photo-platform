@@ -79,10 +79,20 @@ Update this section at the end of every working session.
 
 ```
 Active milestone : Extra Requirements
-Last completed  : 2026-03-31 light/dark mode toggle — PR #168 (merged)
+Last completed  : 2026-03-31 set cover photo per album — PR #171 (merged)
 In progress     : (none)
 Blocked         : (none)
 ```
+
+### Handoff — 2026-03-31 (#142 Set cover photo per album — PR #171)
+**Completed:**
+- `frontend/src/lib/api.ts`: new `updateAlbumCover(token, albumId, coverAssetId)` — PATCHes `{ cover_asset_id }` on the album
+- `frontend/src/app/albums/[id]/page.tsx`: star button (top-left, hover-reveal) on each photo tile calls `handleSetCover`; current cover shows a persistent star indicator; hovering the current cover hides the button (already the cover); `settingCover` boolean prevents double-clicks
+- No backend or migration changes — `cover_asset_id` column and `PATCH /albums/{id}` endpoint already existed
+
+**Gotchas:**
+- The backend fallback (first asset by sort_order) still applies when `cover_asset_id` is null — setting a cover only stores an explicit override
+- `coverAssetId` is derived from `album?.cover_asset_id ?? null` passed down through `DaySection` → `JustifiedRow`; after a successful PATCH the `album` state is replaced with the server response, so the indicator updates immediately
 
 ### Handoff — 2026-03-31 (Light/dark mode toggle — PR #168)
 **Completed:**
