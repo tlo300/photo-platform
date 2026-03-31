@@ -316,19 +316,18 @@ export default function PersonPage() {
     return () => obs.disconnect();
   }, [loadMore]);
 
-  // Optimistic rename: update name immediately, revert on error.
+  // Optimistic rename: update name immediately, close modal only on success.
   // Returns null on success, error message string on failure.
   const handleRename = async (newName: string): Promise<string | null> => {
     if (!token) return "Not authenticated";
     const previousName = personName;
     setPersonName(newName);
-    setShowRenameModal(false);
     try {
       await renamePerson(token, personId, newName);
+      setShowRenameModal(false);
       return null;
     } catch (e) {
       setPersonName(previousName);
-      setShowRenameModal(true);
       return e instanceof Error ? e.message : "Something went wrong, please try again";
     }
   };
