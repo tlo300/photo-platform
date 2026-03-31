@@ -532,6 +532,26 @@ export async function createAlbum(token: string, title: string): Promise<AlbumIt
   return res.json();
 }
 
+export async function updateAlbumCover(
+  token: string,
+  albumId: string,
+  coverAssetId: string
+): Promise<AlbumItem> {
+  const res = await fetch(`${CLIENT_API_URL}/albums/${albumId}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ cover_asset_id: coverAssetId }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error((data as { detail?: string }).detail ?? "Failed to update album cover");
+  }
+  return res.json();
+}
+
 export async function updateAlbumHidden(
   token: string,
   albumId: string,
