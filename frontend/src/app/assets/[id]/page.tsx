@@ -132,7 +132,6 @@ export default function AssetDetailPage() {
   }
 
   const isVideo = asset.mime_type.startsWith("video/");
-  const isHeic = asset.mime_type === "image/heic" || asset.mime_type === "image/heif";
   const hasLiveVideo = asset.is_live_photo && !!asset.live_video_url;
 
   const capturedAt = asset.captured_at
@@ -241,11 +240,40 @@ export default function AssetDetailPage() {
             />
           ) : (
             <img
-              src={isHeic ? (asset.thumbnail_url ?? asset.full_url) : asset.full_url}
+              src={asset.display_url ?? asset.full_url}
               alt={asset.original_filename}
               className="max-h-[70vh] w-full rounded object-contain"
             />
           )}
+
+          {/* Expand / Download actions */}
+          <div className="flex items-center gap-3 self-end text-sm">
+            {!isVideo && !(hasLiveVideo && liveMode === "live") && (
+              <a
+                href={asset.display_url ?? asset.full_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1 text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                  <path d="M12.232 4.232a2.5 2.5 0 0 1 3.536 3.536l-1.225 1.224a.75.75 0 0 0 1.061 1.06l1.224-1.224a4 4 0 0 0-5.656-5.656l-3 3a4 4 0 0 0 .225 5.865.75.75 0 0 0 .977-1.138 2.5 2.5 0 0 1-.142-3.667l3-3Z" />
+                  <path d="M11.603 7.963a.75.75 0 0 0-.977 1.138 2.5 2.5 0 0 1 .142 3.667l-3 3a2.5 2.5 0 0 1-3.536-3.536l1.225-1.224a.75.75 0 0 0-1.061-1.06l-1.224 1.224a4 4 0 0 0 5.656 5.656l3-3a4 4 0 0 0-.225-5.865Z" />
+                </svg>
+                Original size
+              </a>
+            )}
+            <a
+              href={hasLiveVideo && liveMode === "live" ? asset.live_video_url! : asset.full_url}
+              download={asset.original_filename}
+              className="flex items-center gap-1 text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                <path d="M10.75 2.75a.75.75 0 0 0-1.5 0v8.614L6.295 8.235a.75.75 0 1 0-1.09 1.03l4.25 4.5a.75.75 0 0 0 1.09 0l4.25-4.5a.75.75 0 0 0-1.09-1.03l-2.955 3.129V2.75Z" />
+                <path d="M3.5 12.75a.75.75 0 0 0-1.5 0v2.5A2.75 2.75 0 0 0 4.75 18h10.5A2.75 2.75 0 0 0 18 15.25v-2.5a.75.75 0 0 0-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5Z" />
+              </svg>
+              Download
+            </a>
+          </div>
         </div>
 
         {/* Sidebar */}
