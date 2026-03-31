@@ -79,10 +79,18 @@ Update this section at the end of every working session.
 
 ```
 Active milestone : Extra Requirements
-Last completed  : 2026-04-01 Photo overview filter bar — PR #178
+Last completed  : 2026-04-01 Fix has_location filter 500 — PR #179
 In progress     : (none)
 Blocked         : (none)
 ```
+
+### Handoff — 2026-04-01 (Fix has_location filter 500 — PR #179)
+**Completed:**
+- `backend/app/api/assets.py`: replaced `exists().where(Location.asset_id == MediaAsset.id)` with `exists().where(_loc_exists.c.asset_id == MediaAsset.id)` using `Location.__table__.alias("_loc_exists")` — same pattern as the hidden-album filter
+
+**Root cause:** SQLAlchemy auto-correlation removes a table from a subquery's FROM clause when that table already appears in the outer query's FROM clause. `Location` is outjoined in the outer SELECT, so the bare `exists().where(Location...)` had its FROM clause silently removed → `InvalidRequestError: no FROM clauses` → 500 → "Failed to load assets".
+
+**Gotcha:** `select(Location.asset_id).where(...).exists()` (the first attempted fix) does NOT help — the explicit column reference still puts `Location` in the subquery's FROM clause, which still gets auto-correlated away. Only a table alias works because aliases are not present in the outer FROM clause.
 
 ### Handoff — 2026-04-01 (Photo overview filter bar — PR #178)
 **Completed:**
