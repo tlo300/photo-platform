@@ -336,11 +336,13 @@ export async function getAssets(
   limit = 50,
   dateTo?: string,
   before?: string,
+  personId?: string,
 ): Promise<AssetsPage> {
   const params = new URLSearchParams({ limit: String(limit) });
   if (cursor) params.set("cursor", cursor);
   if (dateTo) params.set("date_to", dateTo);
   if (before) params.set("before", before);
+  if (personId) params.set("person_id", personId);
   const res = await fetch(`${CLIENT_API_URL}/assets?${params}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -638,6 +640,24 @@ export async function removeAssetFromAlbum(
     const data = await res.json().catch(() => ({}));
     throw new Error((data as { detail?: string }).detail ?? "Failed to remove from album");
   }
+}
+
+export interface PersonItem {
+  id: string;
+  name: string;
+  photo_count: number;
+  cover_thumbnail_url: string | null;
+}
+
+export async function listPeople(token: string): Promise<PersonItem[]> {
+  const res = await fetch(`${CLIENT_API_URL}/people`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error((data as { detail?: string }).detail ?? "Failed to load people");
+  }
+  return res.json();
 }
 
 export async function createInvitation(
