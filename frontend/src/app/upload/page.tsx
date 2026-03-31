@@ -60,6 +60,66 @@ function getCacheKeys(): string[] {
   return Object.keys(localStorage).filter((k) => k.startsWith("upload_done_"));
 }
 
+/**
+ * Split pairs into batches of at most batchSize, keeping each media file and
+ * its sidecar(s) in the same batch so the worker always has the date metadata
+ * available when it ingests the photo.
+ */
+function buildBatches(
+  pairs: Array<{ file: File; path: string }>,
+  batchSize: number,
+): Array<{ files: File[]; paths: string[] }> {
+  const mediaPairs = pairs.filter((p) => !SIDECAR_JSON.test(p.file.name));
+  const sidecarPairs = pairs.filter((p) => SIDECAR_JSON.test(p.file.name));
+
+  // Index sidecars by the media filename they belong to (case-insensitive).
+  const sidecarMap = new Map<string, Array<{ file: File; path: string }>>();
+  for (const s of sidecarPairs) {
+    let mediaName = s.file.name;
+    if (mediaName.toLowerCase().endsWith(".supplemental-metadata.json")) {
+      mediaName = mediaName.slice(0, -".supplemental-metadata.json".length);
+    } else {
+      mediaName = mediaName.slice(0, -".json".length);
+    }
+    const key = mediaName.toLowerCase();
+    if (!sidecarMap.has(key)) sidecarMap.set(key, []);
+    sidecarMap.get(key)!.push(s);
+  }
+
+  const batches: Array<{ files: File[]; paths: string[] }> = [];
+  let bFiles: File[] = [];
+  let bPaths: string[] = [];
+
+  const flush = () => {
+    if (bFiles.length > 0) {
+      batches.push({ files: bFiles, paths: bPaths });
+      bFiles = [];
+      bPaths = [];
+    }
+  };
+
+  for (const media of mediaPairs) {
+    const sidecars = sidecarMap.get(media.file.name.toLowerCase()) ?? [];
+    sidecarMap.delete(media.file.name.toLowerCase());
+    const groupSize = 1 + sidecars.length;
+    if (bFiles.length > 0 && bFiles.length + groupSize > batchSize) flush();
+    bFiles.push(media.file, ...sidecars.map((s) => s.file));
+    bPaths.push(media.path, ...sidecars.map((s) => s.path));
+  }
+
+  // Orphan sidecars with no matching media file in this upload.
+  for (const orphans of sidecarMap.values()) {
+    for (const orphan of orphans) {
+      if (bFiles.length >= batchSize) flush();
+      bFiles.push(orphan.file);
+      bPaths.push(orphan.path);
+    }
+  }
+
+  flush();
+  return batches;
+}
+
 export default function UploadPage() {
   const { token, ready } = useAuth();
   const router = useRouter();
@@ -171,18 +231,10 @@ export default function UploadPage() {
       return;
     }
 
-    const filesToUpload = pairs.map((p) => p.file);
-    const pathsToUpload = pairs.map((p) => p.path);
-    const totalBytes = filesToUpload.reduce((sum, f) => sum + f.size, 0);
+    const totalBytes = pairs.reduce((sum, p) => sum + p.file.size, 0);
 
-    // Split into batches so no single POST carries the whole folder.
-    const batches: Array<{ files: File[]; paths: string[] }> = [];
-    for (let i = 0; i < filesToUpload.length; i += BATCH_SIZE) {
-      batches.push({
-        files: filesToUpload.slice(i, i + BATCH_SIZE),
-        paths: pathsToUpload.slice(i, i + BATCH_SIZE),
-      });
-    }
+    // Split into batches, keeping each media file and its sidecar(s) together.
+    const batches = buildBatches(pairs, BATCH_SIZE);
 
     const jobIds: string[] = [];
     let bytesBeforeBatch = 0;

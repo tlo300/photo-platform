@@ -338,7 +338,15 @@ async def _ingest_one(
                         pass  # e.g. Feb 29 in a non-leap year — keep original
                 asset.captured_at = captured
             else:
-                asset.captured_at = datetime.now(timezone.utc)
+                # No date from EXIF or sidecar — fall back to folder year (Jan 1)
+                # when the path contains "Photos from YYYY" (Google Takeout convention).
+                # This is far more useful than today's date for grouping.
+                year = _folder_year(rel_path)
+                asset.captured_at = (
+                    datetime(year, 1, 1, tzinfo=timezone.utc)
+                    if year
+                    else datetime.now(timezone.utc)
+                )
                 asset.sidecar_missing = True
                 job.no_sidecar += 1
 
