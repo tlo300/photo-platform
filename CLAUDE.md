@@ -79,10 +79,23 @@ Update this section at the end of every working session.
 
 ```
 Active milestone : Extra Requirements
-Last completed  : 2026-03-31 Fix sidecar/media batch split — PR #177 (open)
+Last completed  : 2026-04-01 Photo overview filter bar — PR #178
 In progress     : (none)
 Blocked         : (none)
 ```
+
+### Handoff — 2026-04-01 (Photo overview filter bar — PR #178)
+**Completed:**
+- `backend/app/api/assets.py`: added `is_live_photo: bool | None = Query(None)` filter param + `is_(True)`/`is_(False)` WHERE clause; no migration needed
+- `backend/tests/test_is_live_photo_filter.py`: 3 integration tests (`is_live_photo=true`, `false`, absent); fixtures resolve `owner_id` by email to avoid cross-module collision
+- `frontend/src/lib/api.ts`: extended `getAssets()` with `mediaType`, `hasLocation`, `isLivePhoto` optional params appended at end (existing callers unaffected)
+- `frontend/src/components/FilterBar.tsx`: new fully-controlled component; exports `GalleryFilters` interface; All/Photos/Videos pills + Has location + Live Photos toggle chips; dark mode support
+- `frontend/src/app/page.tsx`: reads `type`/`has_location`/`live` URL params via `useSearchParams`; `isFirstFilterRender` ref prevents spurious reset on mount; all three `getAssets` call sites (fetchPage, fetchPrevPage, handleYearClick) pass filter params; FilterBar hidden while search is active
+
+**Gotchas:**
+- `filterHasLocation || undefined` and `filterLiveOnly || undefined` intentionally coerce `false` → `undefined` (chips are toggles — off = no filter, not "exclude"); documented in comments
+- Worktree `.env` file must be manually copied from main project (untracked files not included in worktree); done for this session
+- `is_live_photo` backend tests cannot run while dev stack is up (test stack uses same port 5433); run `pytest tests/test_is_live_photo_filter.py` separately after stopping dev stack
 
 ### Handoff — 2026-03-31 (Fix sidecar/media batch split — PR #177)
 **Completed:**
