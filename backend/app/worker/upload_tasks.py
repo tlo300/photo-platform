@@ -8,7 +8,8 @@ Processing pipeline per uploaded file:
   5. Write MediaAsset row + increment users.storage_used_bytes
   6. Extract EXIF → set asset.captured_at
   7. apply_exif → write MediaMetadata row
-  8. Insert Location row from EXIF GPS + dispatch geocode task
+  8. apply_sidecar (when sidecar present) → description, people tags, raw JSON, sidecar GPS
+  9. Insert Location row from EXIF GPS (only when no sidecar GPS) + dispatch geocode task
   9. Album linking:
      - If rel_path has directory components → ensure album hierarchy (rooted at
        target_album_id when provided)
@@ -45,7 +46,7 @@ from app.models.media import Location, MediaAsset
 from app.services.exif import apply_exif, extract_exif
 from app.services.metadata_merge import merge_metadata
 from app.services.storage import StorageError, storage_service
-from app.services.takeout_sidecar import ParsedSidecar, parse_sidecar
+from app.services.takeout_sidecar import ParsedSidecar, apply_sidecar, parse_sidecar
 from app.services.upload_validation import ALLOWED_MIME_TYPES
 from app.worker.celery_app import celery_app
 
@@ -219,6 +220,16 @@ async def _ingest_one(
                 existing_asset = await session.get(MediaAsset, existing)
                 if existing_asset is not None:
                     existing_asset.captured_at = canonical.captured_at
+            # Apply remaining sidecar data: description, people tags, raw JSON, GPS.
+            # This backfills people tags for photos already in the library.
+            try:
+                await apply_sidecar(
+                    session, asset_id=existing, owner_id=owner_id, parsed=parsed_sidecar
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Could not apply sidecar to duplicate asset %s: %s", existing, exc
+                )
         logger.debug("Skipping duplicate %s (checksum %s)", filename, checksum)
         job.duplicates += 1
         dir_part = str(PurePosixPath(rel_path).parent) if rel_path else ""
@@ -334,9 +345,25 @@ async def _ingest_one(
             session.add(asset)
             await apply_exif(session, asset_id=asset_id, result=exif_result)
 
-            # Insert location from EXIF GPS (same pattern as metadata_tasks._apply_metadata)
+            # Apply sidecar: description, people tags, raw JSON, and sidecar GPS.
+            # Runs before the EXIF GPS insert; sidecar GPS uses ON CONFLICT DO UPDATE
+            # so it takes precedence when both sources are present.
+            if parsed_sidecar is not None:
+                await apply_sidecar(
+                    session, asset_id=asset_id, owner_id=owner_id, parsed=parsed_sidecar
+                )
+
+            # Location for geocoding: prefer sidecar GPS, fall back to EXIF GPS.
+            # apply_sidecar already wrote the location row when has_geo is True, so only
+            # insert from EXIF when the sidecar had no GPS (ON CONFLICT DO NOTHING is safe).
             new_location = False
-            if exif_result.gps_latitude is not None and exif_result.gps_longitude is not None:
+            _geocode_lat: float | None = None
+            _geocode_lon: float | None = None
+            if parsed_sidecar is not None and parsed_sidecar.has_geo:
+                new_location = True
+                _geocode_lat = parsed_sidecar.latitude
+                _geocode_lon = parsed_sidecar.longitude
+            elif exif_result.gps_latitude is not None and exif_result.gps_longitude is not None:
                 from geoalchemy2.functions import ST_MakePoint
                 stmt = (
                     pg_insert(Location)
@@ -349,6 +376,8 @@ async def _ingest_one(
                 )
                 await session.execute(stmt)
                 new_location = True
+                _geocode_lat = exif_result.gps_latitude
+                _geocode_lon = exif_result.gps_longitude
 
             # Album linking
             dir_part = str(PurePosixPath(rel_path).parent) if rel_path else ""
@@ -371,11 +400,11 @@ async def _ingest_one(
         from app.worker.thumbnail_tasks import generate_thumbnails
         generate_thumbnails.delay(str(asset_id), str(owner_id))
 
-        if new_location and exif_result.gps_latitude is not None:
+        if new_location and _geocode_lat is not None:
             from app.worker.geocode_tasks import resolve_asset_geocode
             resolve_asset_geocode.delay(
                 str(asset_id), str(owner_id),
-                exif_result.gps_latitude, exif_result.gps_longitude,
+                _geocode_lat, _geocode_lon,
             )
 
     except Exception as exc:
@@ -595,6 +624,17 @@ async def _run_direct_upload(job_id: uuid.UUID, owner_id: uuid.UUID) -> None:
                     if existing_asset is not None:
                         existing_asset.captured_at = canonical.captured_at
                         logger.info("Updated captured_at for %s from sidecar", media_filename_lower)
+                        try:
+                            await apply_sidecar(
+                                session,
+                                asset_id=existing_asset.id,
+                                owner_id=owner_id,
+                                parsed=sidecar,
+                            )
+                        except Exception as exc:
+                            logger.warning(
+                                "Could not apply sidecar to %s: %s", media_filename_lower, exc
+                            )
                 await session.commit()
                 await session.execute(text(f"SET LOCAL app.current_user_id = '{owner_id}'"))
 

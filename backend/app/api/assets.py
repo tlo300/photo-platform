@@ -2,8 +2,8 @@
 
 Endpoints:
   GET /assets               — paginated timeline ordered by captured_at DESC, id DESC.
-                              Optional filters: person, date_from, date_to, media_type, has_location,
-                              near (lat,lon), radius_km, bbox (minLon,minLat,maxLon,maxLat).
+                              Optional filters: person, person_id, date_from, date_to, media_type,
+                              has_location, near (lat,lon), radius_km, bbox (minLon,minLat,maxLon,maxLat).
                               Cursor-based pagination; each response includes a next_cursor field.
                               When near or bbox is specified, results are ordered by captured_at DESC
                               and next_cursor is always null (no cursor pagination for geo queries).
@@ -191,6 +191,7 @@ async def list_assets(
     limit: int = Query(_DEFAULT_PAGE_SIZE, ge=1, le=_MAX_PAGE_SIZE, description="Page size"),
     # Filters
     person: str | None = Query(None, description="Filter by person name (case-insensitive, google_people source)"),
+    person_id: uuid.UUID | None = Query(None, description="Filter by person tag UUID (google_people source)"),
     date_from: datetime | None = Query(None, description="Only assets with captured_at >= this value"),
     date_to: datetime | None = Query(None, description="Only assets with captured_at <= this value"),
     media_type: Literal["photo", "video"] | None = Query(None, description="Filter by media type"),
@@ -225,8 +226,19 @@ async def list_assets(
         .where(MediaAsset.owner_id == user_id)
     )
 
-    # Person filter
-    if person is not None:
+    # Person filter — by name (ilike) or by tag UUID.
+    # person_id takes precedence when both are supplied.
+    if person_id is not None:
+        stmt = (
+            stmt
+            .join(AssetTag, AssetTag.asset_id == MediaAsset.id)
+            .join(Tag, Tag.id == AssetTag.tag_id)
+            .where(
+                AssetTag.source == _GOOGLE_PEOPLE_SOURCE,
+                Tag.id == person_id,
+            )
+        )
+    elif person is not None:
         stmt = (
             stmt
             .join(AssetTag, AssetTag.asset_id == MediaAsset.id)
