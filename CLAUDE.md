@@ -79,10 +79,26 @@ Update this section at the end of every working session.
 
 ```
 Active milestone : Extra Requirements
-Last completed  : 2026-03-31 set cover photo per album — PR #171 (merged)
+Last completed  : 2026-03-31 HEIC full-resolution detail view — PR #173 (open)
 In progress     : (none)
 Blocked         : (none)
 ```
+
+### Handoff — 2026-03-31 (HEIC full-resolution detail view — PR #173)
+**Completed:**
+- `backend/app/worker/thumbnail_tasks.py`: added `_to_display_webp()` — full-res WebP conversion (quality 90, no resize) for HEIC/HEIF; stored at `{user_id}/thumbnails/{asset_id}/display.webp`; runs automatically in `generate_thumbnails` for all new HEIC imports
+- `backend/app/worker/thumbnail_tasks.py`: added `backfill_display_webp_user` Celery task + `_get_heic_assets_for_user` helper for existing assets
+- `backend/app/api/assets.py`: `_DISPLAY_KEY_TEMPLATE`, `_HEIC_MIMES`, `_display_url()` helper, `display_url: str | None` on `AssetDetail`
+- `backend/app/api/admin.py`: `POST /admin/backfill-display-webp` endpoint
+- `frontend/src/lib/api.ts`: `display_url: string | null` on `AssetDetail`
+- `frontend/src/app/assets/[id]/page.tsx`: image src changed to `display_url ?? full_url` (drops HEIC thumbnail hack); added "Original size" (new tab) + "Download" (original file) buttons below media viewer for all asset types; Original size hidden for videos and live mode
+- Backfill ran: ~5,000 HEIC assets across 2 users, ~50 minutes
+
+**Gotchas:**
+- `select` was missing from imports in `thumbnail_tasks.py` — caused the first backfill run to fail; fixed in a follow-up commit
+- `display_url` is `null` for non-HEIC images and videos — those use `full_url` directly in the player/img tag; no change to their display path
+- "Original size" link points to `display_url` (WebP) for HEIC, `full_url` for other images — opens in new tab at native pixel dimensions
+- "Download" always serves `full_url` (the original HEIC/JPEG/video file), not the WebP
 
 ### Handoff — 2026-03-31 (#142 Set cover photo per album — PR #171)
 **Completed:**
