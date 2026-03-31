@@ -162,24 +162,19 @@ def _insert_tag(engine, owner_email: str, name: str) -> str:
 
 @pytest.fixture(scope="module")
 def user_ids(migrator_engine, user_token: str, other_user_token: str) -> dict:
-    """Resolve user IDs for the two test users after both are created.
-
-    Uses the same ordering strategy as test_asset_detail.py: the two most
-    recently created 'user'-role users are other_user (rows[0]) and user (rows[1]).
-    """
+    """Resolve user IDs for the two test users after both are created."""
     with migrator_engine.connect() as conn:
-        rows = conn.execute(
-            text("SELECT id, email FROM users WHERE role = 'user' ORDER BY created_at DESC LIMIT 2")
-        ).fetchall()
-    other_user_id = str(rows[0][0])
-    other_user_email = rows[0][1]
-    user_id = str(rows[1][0])
-    user_email = rows[1][1]
+        user_row = conn.execute(
+            text("SELECT id, email FROM users WHERE email LIKE 'user-rename-%'")
+        ).fetchone()
+        other_row = conn.execute(
+            text("SELECT id, email FROM users WHERE email LIKE 'other-rename-%'")
+        ).fetchone()
     return {
-        "user_id": user_id,
-        "user_email": user_email,
-        "other_user_id": other_user_id,
-        "other_user_email": other_user_email,
+        "user_id": str(user_row[0]),
+        "user_email": user_row[1],
+        "other_user_id": str(other_row[0]),
+        "other_user_email": other_row[1],
     }
 
 

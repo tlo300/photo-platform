@@ -152,7 +152,9 @@ async def rename_person(
     if not new_name:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Name cannot be empty")
 
-    result = await session.execute(select(Tag).where(Tag.id == person_id))
+    result = await session.execute(
+        select(Tag).where(Tag.id == person_id, Tag.owner_id == user_id)
+    )
     tag = result.scalar_one_or_none()
     if tag is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Person not found")
