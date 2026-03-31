@@ -79,10 +79,35 @@ Update this section at the end of every working session.
 
 ```
 Active milestone : Extra Requirements
-Last completed  : 2026-03-31 People page — PR #174 (merged)
+Last completed  : 2026-04-01 Photo overview filter bar — PR #178
 In progress     : (none)
 Blocked         : (none)
 ```
+
+### Handoff — 2026-04-01 (Photo overview filter bar — PR #178)
+**Completed:**
+- `backend/app/api/assets.py`: added `is_live_photo: bool | None = Query(None)` filter param + `is_(True)`/`is_(False)` WHERE clause; no migration needed
+- `backend/tests/test_is_live_photo_filter.py`: 3 integration tests (`is_live_photo=true`, `false`, absent); fixtures resolve `owner_id` by email to avoid cross-module collision
+- `frontend/src/lib/api.ts`: extended `getAssets()` with `mediaType`, `hasLocation`, `isLivePhoto` optional params appended at end (existing callers unaffected)
+- `frontend/src/components/FilterBar.tsx`: new fully-controlled component; exports `GalleryFilters` interface; All/Photos/Videos pills + Has location + Live Photos toggle chips; dark mode support
+- `frontend/src/app/page.tsx`: reads `type`/`has_location`/`live` URL params via `useSearchParams`; `isFirstFilterRender` ref prevents spurious reset on mount; all three `getAssets` call sites (fetchPage, fetchPrevPage, handleYearClick) pass filter params; FilterBar hidden while search is active
+
+**Gotchas:**
+- `filterHasLocation || undefined` and `filterLiveOnly || undefined` intentionally coerce `false` → `undefined` (chips are toggles — off = no filter, not "exclude"); documented in comments
+- Worktree `.env` file must be manually copied from main project (untracked files not included in worktree); done for this session
+- `is_live_photo` backend tests cannot run while dev stack is up (test stack uses same port 5433); run `pytest tests/test_is_live_photo_filter.py` separately after stopping dev stack
+
+### Handoff — 2026-03-31 (Fix sidecar/media batch split — PR #177)
+**Completed:**
+- `frontend/src/app/upload/page.tsx`: replaced naive `slice(i, i+BATCH_SIZE)` batching with `buildBatches()` — separates sidecars from media, indexes sidecars by media filename (handles both `.json` and `.supplemental-metadata.json`), groups each media file with its sidecar(s) before splitting at BATCH_SIZE; orphan sidecars (no matching media in upload) appended at end
+- `backend/app/worker/upload_tasks.py`: `_ingest_one` fallback when no date from EXIF or sidecar — now uses `Jan 1 <folder_year>` when path contains `Photos from YYYY`; was `datetime.now()` which put assets in today's bucket
+- SQL hotfix: 2,101 user2 assets updated from today's date to `Jan 1 <folder_year>` via `regexp_match`; 21 remain (19 in "Colombia 2018", 2 "Failed videos") — genuinely no date source
+
+**Gotchas:**
+- Root cause was a race condition: with concurrent Celery workers, the sidecar-only batch could complete and run its retroactive date-fix query before the media batch committed — finding no existing assets and silently doing nothing
+- The retroactive fix in the worker queries by `original_filename` — it does work for true retries, but not for the concurrent-worker race
+- `sidecar_missing = true` is set when the worker finds no sidecar at ingest time; all 2,122 today's-date assets had this flag, confirming the sidecar was never present in that job
+- `buildBatches` uses `file.name` (basename only) for sidecar matching — the browser's `webkitRelativePath` is on the file object but `file.name` is always just the filename; this matches how the worker strips the sidecar suffix to find the media file
 
 ### Handoff — 2026-03-31 (People page — PR #174)
 **Completed:**

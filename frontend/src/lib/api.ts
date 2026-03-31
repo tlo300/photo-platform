@@ -337,12 +337,18 @@ export async function getAssets(
   dateTo?: string,
   before?: string,
   personId?: string,
+  mediaType?: "photo" | "video",
+  hasLocation?: boolean,
+  isLivePhoto?: boolean,
 ): Promise<AssetsPage> {
   const params = new URLSearchParams({ limit: String(limit) });
   if (cursor) params.set("cursor", cursor);
   if (dateTo) params.set("date_to", dateTo);
   if (before) params.set("before", before);
   if (personId) params.set("person_id", personId);
+  if (mediaType) params.set("media_type", mediaType);
+  if (hasLocation !== undefined) params.set("has_location", String(hasLocation));
+  if (isLivePhoto !== undefined) params.set("is_live_photo", String(isLivePhoto));
   const res = await fetch(`${CLIENT_API_URL}/assets?${params}`, {
     headers: { Authorization: `Bearer ${token}` },
   });

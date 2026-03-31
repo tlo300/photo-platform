@@ -8,11 +8,12 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { getAssets, getAssetYears, searchAssets, AssetItem } from "@/lib/api";
 import { MediaCard } from "@/components/MediaCard";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { FilterBar, GalleryFilters } from "@/components/FilterBar";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -292,6 +293,15 @@ function TimelineScrubber({
 export default function Home() {
   const { token, ready, logout } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const filterType = (searchParams.get("type") as "photo" | "video" | null) ?? null;
+  const filterHasLocation = searchParams.get("has_location") === "true";
+  const filterLiveOnly = searchParams.get("live") === "true";
+  const filters: GalleryFilters = {
+    type: filterType,
+    hasLocation: filterHasLocation,
+    liveOnly: filterLiveOnly,
+  };
 
   // Timeline state
   const [items, setItems] = useState<AssetItem[]>([]);
@@ -379,11 +389,21 @@ export default function Home() {
       setLoading(true);
       setError(null);
       try {
-        const page = await getAssets(token, cursor);
+        const page = await getAssets(
+          token,
+          cursor,
+          50,
+          undefined,
+          undefined,
+          undefined,
+          filterType ?? undefined,
+          // These chips are toggles: off = no filter (undefined), on = true.
+          // We intentionally never send false — "exclude has-location" is not a use case.
+          filterHasLocation || undefined,
+          filterLiveOnly || undefined,
+        );
         setItems((prev) => (cursor ? [...prev, ...page.items] : page.items));
         setNextCursor(page.next_cursor);
-        // prev_cursor is only meaningful on the initial fetch (no cursor) — null there.
-        // When appending more pages downward, prevCursor stays as-is.
         if (!cursor) setPrevCursor(page.prev_cursor);
       } catch (e) {
         setError(e instanceof Error ? e.message : "Failed to load photos");
@@ -391,7 +411,7 @@ export default function Home() {
         setLoading(false);
       }
     },
-    [token]
+    [token, filterType, filterHasLocation, filterLiveOnly]
   );
 
   const fetchPrevPage = useCallback(
@@ -400,7 +420,19 @@ export default function Home() {
       setLoading(true);
       setError(null);
       try {
-        const page = await getAssets(token, undefined, 50, undefined, before);
+        const page = await getAssets(
+          token,
+          undefined,
+          50,
+          undefined,
+          before,
+          undefined,
+          filterType ?? undefined,
+          // These chips are toggles: off = no filter (undefined), on = true.
+          // We intentionally never send false — "exclude has-location" is not a use case.
+          filterHasLocation || undefined,
+          filterLiveOnly || undefined,
+        );
         if (page.items.length > 0 && scrollRef.current) {
           scrollAnchor.current = {
             scrollTop: scrollRef.current.scrollTop,
@@ -415,8 +447,22 @@ export default function Home() {
         setLoading(false);
       }
     },
-    [token]
+    [token, filterType, filterHasLocation, filterLiveOnly]
   );
+
+  // Guard against resetting the feed on the initial mount: the filter values from the URL
+  // are available on the first render, which would otherwise trigger a spurious reset before
+  // the initial fetchPage() fires (nextCursor === undefined → fetchPage handles that case).
+  const isFirstFilterRender = useRef(true);
+  useEffect(() => {
+    if (isFirstFilterRender.current) {
+      isFirstFilterRender.current = false;
+      return;
+    }
+    setItems([]);
+    setNextCursor(undefined);
+    setPrevCursor(null);
+  }, [filterType, filterHasLocation, filterLiveOnly]);
 
   // Initial fetch
   useEffect(() => {
@@ -540,16 +586,26 @@ export default function Home() {
     if (!el) return;
     const target = el.querySelector<HTMLElement>(selector);
     if (target) {
-      // Year already in DOM — scroll to it.
       el.scrollTop = offsetTopWithin(target, el) - 8;
       return;
     }
-    // Year not loaded yet — reset feed to start from the end of that year.
     if (!token) return;
     setLoading(true);
     setError(null);
     try {
-      const page = await getAssets(token, undefined, 50, `${year + 1}-01-01T00:00:00Z`);
+      const page = await getAssets(
+        token,
+        undefined,
+        50,
+        `${year + 1}-01-01T00:00:00Z`,
+        undefined,
+        undefined,
+        filterType ?? undefined,
+        // These chips are toggles: off = no filter (undefined), on = true.
+        // We intentionally never send false — "exclude has-location" is not a use case.
+        filterHasLocation || undefined,
+        filterLiveOnly || undefined,
+      );
       pendingScrollSelector.current = selector;
       setItems(page.items);
       setNextCursor(page.next_cursor);
@@ -559,6 +615,17 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleFilterChange = (f: GalleryFilters) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (f.type) params.set("type", f.type);
+    else params.delete("type");
+    if (f.hasLocation) params.set("has_location", "true");
+    else params.delete("has_location");
+    if (f.liveOnly) params.set("live", "true");
+    else params.delete("live");
+    router.push(`/?${params.toString()}`);
   };
 
   return (
@@ -599,6 +666,9 @@ export default function Home() {
           className="w-full rounded-lg border border-gray-200 bg-gray-50 px-4 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-gray-400 focus:bg-white focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-500 dark:focus:border-gray-500 dark:focus:bg-gray-700"
         />
       </div>
+
+      {/* Filter bar — hidden while searching (search endpoint ignores these filters) */}
+      {!isSearching && <FilterBar filters={filters} onChange={handleFilterChange} />}
 
       {/* Content area — scroll container + scrubber side by side */}
       <div className="flex flex-1 overflow-hidden">

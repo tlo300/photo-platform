@@ -3,7 +3,7 @@
 Endpoints:
   GET /assets               — paginated timeline ordered by captured_at DESC, id DESC.
                               Optional filters: person, person_id, date_from, date_to, media_type,
-                              has_location, near (lat,lon), radius_km, bbox (minLon,minLat,maxLon,maxLat).
+                              has_location, is_live_photo, near (lat,lon), radius_km, bbox (minLon,minLat,maxLon,maxLat).
                               Cursor-based pagination; each response includes a next_cursor field.
                               When near or bbox is specified, results are ordered by captured_at DESC
                               and next_cursor is always null (no cursor pagination for geo queries).
@@ -196,6 +196,7 @@ async def list_assets(
     date_to: datetime | None = Query(None, description="Only assets with captured_at <= this value"),
     media_type: Literal["photo", "video"] | None = Query(None, description="Filter by media type"),
     has_location: bool | None = Query(None, description="True = only assets with GPS; False = only without"),
+    is_live_photo: bool | None = Query(None, description="True = only Live Photos; False = exclude Live Photos"),
     near: str | None = Query(None, description="lat,lon centre for proximity filter (e.g. 52.37,4.89)"),
     radius_km: float = Query(10.0, ge=0.1, le=5000.0, description="Search radius in km (requires near)"),
     bbox: str | None = Query(None, description="Bounding box filter: minLon,minLat,maxLon,maxLat"),
@@ -271,6 +272,12 @@ async def list_assets(
         stmt = stmt.where(
             ~exists().where(Location.asset_id == MediaAsset.id)
         )
+
+    # Live photo filter
+    if is_live_photo is True:
+        stmt = stmt.where(MediaAsset.is_live_photo.is_(True))
+    elif is_live_photo is False:
+        stmt = stmt.where(MediaAsset.is_live_photo.is_(False))
 
     # Hidden-album filter: exclude assets that belong exclusively to hidden albums.
     # An asset with no album membership is always shown.
