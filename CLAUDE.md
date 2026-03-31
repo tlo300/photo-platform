@@ -79,10 +79,31 @@ Update this section at the end of every working session.
 
 ```
 Active milestone : Extra Requirements
-Last completed  : 2026-03-31 bidirectional infinite scroll — PR #164 (open)
+Last completed  : 2026-03-31 map heatmap view — PR #167 (open)
 In progress     : (none)
 Blocked         : (none)
 ```
+
+### Handoff — 2026-03-31 (Map heatmap view — PR #167)
+**Completed:**
+- `backend/app/api/map.py`: new `GET /map/points` endpoint — returns all geotagged asset locations as `[{id, lat, lon}]`, inner-joins `Location`, RLS-scoped, capped at 50k points
+- `backend/app/api/assets.py`: added `bbox=minLon,minLat,maxLon,maxLat` query param — uses PostGIS `ST_MakeEnvelope` + `ST_Within`; inner-joins Location when active; cursor pagination bypassed (same pattern as `near`); mutually exclusive with `near` (returns 400 if both supplied)
+- `backend/app/main.py`: registered `map_router`
+- `frontend/src/lib/api.ts`: `MapPoint` interface; `getMapPoints(token)`; `getAssetsInBbox(token, minLon, minLat, maxLon, maxLat, limit)`
+- `frontend/src/components/MapView.tsx`: vanilla Leaflet map (dynamically imported, `ssr: false`); sets `window.L = L` before importing `leaflet.heat` (which uses the global `L`); stores `leafletRef` so the separate heat-layer effect can access `L`; heatmap options: `radius:22, blur:17, maxZoom:7, minOpacity:0.3, max:0.6`
+- `frontend/src/app/map/page.tsx`: full-screen split layout — Leaflet map (flex-1) + always-visible side panel (w-[36rem]); 5-column thumbnail grid; 400ms debounced bounds fetch on pan/zoom; clicking thumbnail calls `router.push('/assets/[id]')` which is intercepted by existing `@modal` system
+- `frontend/src/app/@modal/(.)assets/[id]/page.tsx`: raised modal z-index from `z-50` to `z-[1000]` — Leaflet's highest pane (controls) is z-index 800
+- `frontend/src/types/leaflet-heat.d.ts`: type augmentation for `leaflet.heat` (no official @types)
+- `frontend/next.config.ts`: added `https://*.tile.openstreetmap.org` to `img-src` CSP for tile loading
+- `frontend/src/app/page.tsx`: added Map link to home page nav
+- `frontend/package.json`: added `leaflet ^1.9.4`, `leaflet.heat ^0.2.0`, `@types/leaflet ^1.9.14`
+
+**Gotchas:**
+- `leaflet.heat` (2014, no UMD) accesses the global `L` at module evaluation time — must do `window.L = L` before `await import("leaflet.heat")` or heatLayer won't be defined
+- Leaflet requires `window` at module evaluation time — component must be dynamically imported with `{ ssr: false }`; CSS (`leaflet/dist/leaflet.css`) must also be imported inside the async init (not at module top level) to avoid SSR errors
+- The heat-layer update effect depends on `mapReady` state (set after async init completes) so it re-runs once the map is ready; `leafletRef` carries the `L` reference across the two effects
+- `maxZoom` in leaflet.heat is not the map zoom ceiling — it controls the zoom level at which point weights are 1.0; at lower zooms, weight = `1/2^(maxZoom - zoom)`. The original `maxZoom:17` made all points invisible at world zoom 2 (`1/2^15 ≈ 0`)
+- `ST_MakeEnvelope` / `ST_Within` imported from `geoalchemy2.functions` — no new pip dependency
 
 ### Handoff — 2026-03-31 (#144 Bidirectional infinite scroll — PR #164)
 **Completed:**
