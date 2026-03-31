@@ -188,9 +188,9 @@ function DaySection({
   return (
     <section className="mb-6">
       <div className="mb-2 flex items-baseline gap-2">
-        <h2 className="text-sm font-semibold text-gray-800">{group.label}</h2>
+        <h2 className="text-sm font-semibold text-gray-800 dark:text-gray-200">{group.label}</h2>
         {group.locationSummary && (
-          <span className="text-xs text-gray-400">{group.locationSummary}</span>
+          <span className="text-xs text-gray-400 dark:text-gray-500">{group.locationSummary}</span>
         )}
       </div>
       <div className="flex flex-col gap-0.5">
@@ -302,13 +302,13 @@ export default function AlbumDetailPage() {
   const dayGroups = groupByDay(assets);
 
   return (
-    <main className="min-h-screen bg-white px-4 py-6">
+    <main className="min-h-screen bg-white px-4 py-6 dark:bg-gray-900">
       {/* Header */}
       <div className="mb-6 flex items-center justify-between gap-4">
         <div className="flex items-center gap-4">
           <Link
             href="/albums"
-            className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-900"
+            className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
           >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
               <path fillRule="evenodd" d="M11.78 5.22a.75.75 0 0 1 0 1.06L8.06 10l3.72 3.72a.75.75 0 1 1-1.06 1.06l-4.25-4.25a.75.75 0 0 1 0-1.06l4.25-4.25a.75.75 0 0 1 1.06 0Z" clipRule="evenodd" />
@@ -317,8 +317,8 @@ export default function AlbumDetailPage() {
           </Link>
           {album && (
             <div>
-              <h1 className="text-lg font-semibold text-gray-900">{album.title}</h1>
-              <p className="text-xs text-gray-400">
+              <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{album.title}</h1>
+              <p className="text-xs text-gray-400 dark:text-gray-500">
                 {album.asset_count} {album.asset_count === 1 ? "photo" : "photos"}
               </p>
             </div>
@@ -330,8 +330,8 @@ export default function AlbumDetailPage() {
             disabled={togglingHidden}
             className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm transition-colors disabled:opacity-40 ${
               album.is_hidden
-                ? "border-gray-300 bg-gray-100 text-gray-500 hover:border-gray-400 hover:text-gray-700"
-                : "border-gray-200 text-gray-500 hover:border-gray-400 hover:text-gray-700"
+                ? "border-gray-300 bg-gray-100 text-gray-500 hover:border-gray-400 hover:text-gray-700 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-400 dark:hover:border-gray-500"
+                : "border-gray-200 text-gray-500 hover:border-gray-400 hover:text-gray-700 dark:border-gray-700 dark:text-gray-400 dark:hover:border-gray-500"
             }`}
             title={album.is_hidden ? "Show in feed" : "Hide from feed"}
           >
@@ -358,13 +358,13 @@ export default function AlbumDetailPage() {
 
       {/* Loading / error / empty states — grid div always stays in DOM for ResizeObserver */}
       {loading && (
-        <p className="mt-24 text-center text-sm text-gray-400">Loading…</p>
+        <p className="mt-24 text-center text-sm text-gray-400 dark:text-gray-500">Loading…</p>
       )}
       {!loading && error && (
-        <p className="mb-4 rounded bg-red-50 px-4 py-2 text-sm text-red-700">{error}</p>
+        <p className="mb-4 rounded bg-red-50 px-4 py-2 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-400">{error}</p>
       )}
       {!loading && !error && assets.length === 0 && (
-        <p className="mt-24 text-center text-gray-400">This album is empty.</p>
+        <p className="mt-24 text-center text-gray-400 dark:text-gray-500">This album is empty.</p>
       )}
 
       <div ref={gridRef}>

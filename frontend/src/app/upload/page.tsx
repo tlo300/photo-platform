@@ -275,7 +275,7 @@ export default function UploadPage() {
   const importedCount = job ? job.processed - job.duplicates - errorCount : 0;
 
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center gap-6 p-8">
+    <main className="flex min-h-screen flex-col items-center justify-center gap-6 p-8 bg-white dark:bg-gray-900">
       <h1 className="text-2xl font-bold">Upload Photos &amp; Videos</h1>
 
       {/* ---- Phase: idle ---- */}
@@ -286,13 +286,13 @@ export default function UploadPage() {
           )}
 
           {/* Mode toggle */}
-          <div className="flex rounded-lg border border-gray-200 overflow-hidden w-full">
+          <div className="flex rounded-lg border border-gray-200 overflow-hidden w-full dark:border-gray-700">
             <button
               onClick={() => handleModeChange("files")}
               className={`flex-1 py-2 text-sm font-medium transition-colors ${
                 mode === "files"
                   ? "bg-blue-600 text-white"
-                  : "bg-white text-gray-600 hover:bg-gray-50"
+                  : "bg-white text-gray-600 hover:bg-gray-50 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
               }`}
             >
               Files
@@ -302,7 +302,7 @@ export default function UploadPage() {
               className={`flex-1 py-2 text-sm font-medium transition-colors ${
                 mode === "folder"
                   ? "bg-blue-600 text-white"
-                  : "bg-white text-gray-600 hover:bg-gray-50"
+                  : "bg-white text-gray-600 hover:bg-gray-50 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
               }`}
             >
               Folder
@@ -312,16 +312,16 @@ export default function UploadPage() {
           {/* File / folder picker */}
           <label
             htmlFor="upload-input"
-            className="flex flex-col items-center gap-2 w-full cursor-pointer rounded-lg border-2 border-dashed border-gray-300 p-8 hover:border-gray-400"
+            className="flex flex-col items-center gap-2 w-full cursor-pointer rounded-lg border-2 border-dashed border-gray-300 p-8 hover:border-gray-400 dark:border-gray-600 dark:hover:border-gray-400"
           >
             {selectedFiles.length > 0 ? (
-              <span className="text-sm font-medium text-gray-800 text-center">
+              <span className="text-sm font-medium text-gray-800 text-center dark:text-gray-200">
                 {selectedFiles.length === 1
                   ? selectedFiles[0].name
                   : `${selectedFiles.length} files selected`}
               </span>
             ) : (
-              <span className="text-sm text-gray-500">
+              <span className="text-sm text-gray-500 dark:text-gray-400">
                 {mode === "folder"
                   ? "Select a folder to upload"
                   : "Select photos or videos"}
@@ -376,11 +376,11 @@ export default function UploadPage() {
       {/* ---- Phase: uploading ---- */}
       {phase === "uploading" && (
         <div className="flex flex-col items-center gap-3 w-full max-w-sm">
-          <p className="text-sm text-gray-600">Uploading… {uploadPercent}%</p>
+          <p className="text-sm text-gray-600 dark:text-gray-400">Uploading… {uploadPercent}%</p>
           {skippedCount > 0 && (
             <p className="text-xs text-green-600">{skippedCount.toLocaleString()} files skipped (already uploaded)</p>
           )}
-          <div className="w-full h-3 rounded-full bg-gray-200">
+          <div className="w-full h-3 rounded-full bg-gray-200 dark:bg-gray-700">
             <div
               className="h-3 rounded-full bg-blue-500 transition-all duration-200"
               style={{ width: `${uploadPercent}%` }}
@@ -400,7 +400,7 @@ export default function UploadPage() {
               ? `${Math.floor(etaSec / 60)}m ${Math.round(etaSec % 60)}s`
               : `${Math.round(etaSec)}s`;
             return (
-              <div className="w-full flex justify-between text-xs text-gray-500">
+              <div className="w-full flex justify-between text-xs text-gray-500 dark:text-gray-400">
                 <span>{fmt(uploadStats.loaded)} / {fmt(uploadStats.total)}</span>
                 <span>{fmtSpeed(uploadStats.speed)}</span>
                 <span>{eta} left</span>
@@ -428,13 +428,13 @@ export default function UploadPage() {
                   <span>Processing…</span>
                   <span>{pct}%</span>
                 </div>
-                <div className="w-full h-3 rounded-full bg-gray-200">
+                <div className="w-full h-3 rounded-full bg-gray-200 dark:bg-gray-700">
                   <div
                     className="h-3 rounded-full bg-green-500 transition-all duration-300"
                     style={{ width: `${pct}%` }}
                   />
                 </div>
-                <div className="w-full flex justify-between text-xs text-gray-500">
+                <div className="w-full flex justify-between text-xs text-gray-500 dark:text-gray-400">
                   <span>{job.processed} / {job.total} files</span>
                   {rate > 0 && <span>{rate.toFixed(1)} files/s</span>}
                   {eta && <span>{eta} left</span>}
@@ -457,7 +457,7 @@ export default function UploadPage() {
               <div className="w-full h-3 rounded-full bg-gray-200 overflow-hidden">
                 <div className="h-3 w-1/3 rounded-full bg-green-500 animate-pulse" />
               </div>
-              <p className="text-xs text-gray-400">Waiting for worker to start…</p>
+              <p className="text-xs text-gray-400 dark:text-gray-500">Waiting for worker to start…</p>
             </>
           )}
         </div>
@@ -476,24 +476,24 @@ export default function UploadPage() {
           )}
 
           <div className="grid grid-cols-3 gap-2 text-center">
-            <div className="rounded-lg border border-gray-200 py-3">
-              <p className="text-2xl font-bold text-gray-800">{importedCount}</p>
-              <p className="text-xs text-gray-500 mt-1">Imported</p>
+            <div className="rounded-lg border border-gray-200 py-3 dark:border-gray-700">
+              <p className="text-2xl font-bold text-gray-800 dark:text-gray-200">{importedCount}</p>
+              <p className="text-xs text-gray-500 mt-1 dark:text-gray-400">Imported</p>
             </div>
-            <div className="rounded-lg border border-gray-200 py-3">
-              <p className="text-2xl font-bold text-gray-800">{job.duplicates}</p>
-              <p className="text-xs text-gray-500 mt-1">Duplicates</p>
+            <div className="rounded-lg border border-gray-200 py-3 dark:border-gray-700">
+              <p className="text-2xl font-bold text-gray-800 dark:text-gray-200">{job.duplicates}</p>
+              <p className="text-xs text-gray-500 mt-1 dark:text-gray-400">Duplicates</p>
             </div>
-            <div className="rounded-lg border border-gray-200 py-3">
-              <p className="text-2xl font-bold text-gray-800">{errorCount}</p>
-              <p className="text-xs text-gray-500 mt-1">Errors</p>
+            <div className="rounded-lg border border-gray-200 py-3 dark:border-gray-700">
+              <p className="text-2xl font-bold text-gray-800 dark:text-gray-200">{errorCount}</p>
+              <p className="text-xs text-gray-500 mt-1 dark:text-gray-400">Errors</p>
             </div>
           </div>
 
           {errorCount > 0 && (
-            <div className="rounded-lg border border-red-100 bg-red-50">
+            <div className="rounded-lg border border-red-100 bg-red-50 dark:border-red-900/40 dark:bg-red-900/20">
               <button
-                className="flex w-full items-center justify-between px-4 py-2 text-sm text-red-700 font-medium"
+                className="flex w-full items-center justify-between px-4 py-2 text-sm text-red-700 font-medium dark:text-red-400"
                 onClick={() => setExpandedErrors((v) => !v)}
               >
                 <span>
@@ -502,13 +502,13 @@ export default function UploadPage() {
                 <span>{expandedErrors ? "▲" : "▼"}</span>
               </button>
               {expandedErrors && (
-                <ul className="max-h-64 overflow-y-auto divide-y divide-red-100 border-t border-red-100">
+                <ul className="max-h-64 overflow-y-auto divide-y divide-red-100 border-t border-red-100 dark:divide-red-900/40 dark:border-red-900/40">
                   {job.errors.map((e, i) => (
                     <li key={i} className="px-4 py-2">
-                      <p className="text-sm font-medium text-gray-700">
+                      <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
                         {e.filename ?? "(unknown file)"}
                       </p>
-                      <p className="text-xs text-red-600 mt-0.5">{e.reason}</p>
+                      <p className="text-xs text-red-600 mt-0.5 dark:text-red-400">{e.reason}</p>
                     </li>
                   ))}
                 </ul>

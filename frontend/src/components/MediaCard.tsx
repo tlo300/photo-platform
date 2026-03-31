@@ -60,7 +60,7 @@ export function MediaCard({ asset, width, height, token, onClick }: MediaCardPro
       href={`/assets/${asset.id}`}
       onClick={onClick}
       style={sizeStyle}
-      className="relative block overflow-hidden bg-gray-100"
+      className="relative block overflow-hidden bg-gray-100 dark:bg-gray-800"
       // Desktop hover
       onMouseEnter={asset.is_live_photo ? fetchAndPlay : undefined}
       onMouseLeave={asset.is_live_photo ? stopPlaying : undefined}
@@ -94,7 +94,7 @@ export function MediaCard({ asset, width, height, token, onClick }: MediaCardPro
           }}
         />
       ) : (
-        <div className="h-full w-full animate-pulse bg-gray-200" />
+        <div className="h-full w-full animate-pulse bg-gray-200 dark:bg-gray-700" />
       )}
 
       {asset.is_live_photo && (

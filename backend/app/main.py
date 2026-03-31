@@ -12,6 +12,7 @@ from app.api.albums import router as albums_router
 from app.api.assets import router as assets_router
 from app.api.auth import router as auth_router
 from app.api.import_ import router as import_router
+from app.api.map import router as map_router
 from app.api.shares import router as shares_router
 from app.api.upload import router as upload_router
 from app.api.users import router as users_router
@@ -83,6 +84,7 @@ app.include_router(import_router)
 app.include_router(upload_router)
 app.include_router(assets_router)
 app.include_router(albums_router)
+app.include_router(map_router)
 
 
 @app.get("/health")
