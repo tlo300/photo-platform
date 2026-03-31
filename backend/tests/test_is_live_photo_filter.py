@@ -70,7 +70,8 @@ def _make_invitation(engine, email: str, admin_id: str) -> str:
 
 
 @pytest.fixture(scope="module")
-async def user_token(migrator_engine) -> str:
+async def user_token(migrator_engine) -> tuple[str, str]:
+    """Returns (token, email) for the registered test user."""
     admin_email = f"admin-lp-{uuid.uuid4().hex[:8]}@test.com"
     password = "AdminP@ss1!"
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -86,7 +87,7 @@ async def user_token(migrator_engine) -> str:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post(REGISTER_URL, json={"email": user_email, "display_name": "User", "password": "UserP@ss1!", "invitation_token": invitation})
         assert resp.status_code == 201, resp.text
-        return resp.json()["access_token"]
+        return resp.json()["access_token"], user_email
 
 
 def _insert_asset(engine, owner_id: str, is_live: bool) -> str:
@@ -115,11 +116,11 @@ def _insert_asset(engine, owner_id: str, is_live: bool) -> str:
 
 @pytest.fixture(scope="module")
 def owner_id(migrator_engine, user_token) -> str:
-    """Get the user_id for the user_token fixture."""
+    """Get the user_id for the user_token fixture by email."""
+    token, email = user_token
     with migrator_engine.connect() as conn:
-        # The most recently created non-admin user
         row = conn.execute(
-            text("SELECT id FROM users WHERE role = 'viewer' ORDER BY created_at DESC LIMIT 1")
+            text("SELECT id FROM users WHERE email = :e"), {"e": email}
         ).fetchone()
         return str(row[0])
 
@@ -133,11 +134,12 @@ def test_data(migrator_engine, owner_id):
 
 @pytest.mark.asyncio
 async def test_is_live_photo_true_returns_only_live(user_token, test_data):
+    token, _ = user_token
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(
             ASSETS_URL,
             params={"is_live_photo": "true"},
-            headers={"Authorization": f"Bearer {user_token}"},
+            headers={"Authorization": f"Bearer {token}"},
         )
     assert resp.status_code == 200
     ids = [a["id"] for a in resp.json()["items"]]
@@ -147,11 +149,12 @@ async def test_is_live_photo_true_returns_only_live(user_token, test_data):
 
 @pytest.mark.asyncio
 async def test_is_live_photo_false_excludes_live(user_token, test_data):
+    token, _ = user_token
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(
             ASSETS_URL,
             params={"is_live_photo": "false"},
-            headers={"Authorization": f"Bearer {user_token}"},
+            headers={"Authorization": f"Bearer {token}"},
         )
     assert resp.status_code == 200
     ids = [a["id"] for a in resp.json()["items"]]
@@ -161,10 +164,12 @@ async def test_is_live_photo_false_excludes_live(user_token, test_data):
 
 @pytest.mark.asyncio
 async def test_no_live_filter_returns_both(user_token, test_data):
+    token, _ = user_token
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(
             ASSETS_URL,
-            headers={"Authorization": f"Bearer {user_token}"},
+            params={"limit": "200"},
+            headers={"Authorization": f"Bearer {token}"},
         )
     assert resp.status_code == 200
     ids = [a["id"] for a in resp.json()["items"]]

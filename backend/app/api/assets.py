@@ -274,8 +274,10 @@ async def list_assets(
         )
 
     # Live photo filter
-    if is_live_photo is not None:
-        stmt = stmt.where(MediaAsset.is_live_photo == is_live_photo)
+    if is_live_photo is True:
+        stmt = stmt.where(MediaAsset.is_live_photo.is_(True))
+    elif is_live_photo is False:
+        stmt = stmt.where(MediaAsset.is_live_photo.is_(False))
 
     # Hidden-album filter: exclude assets that belong exclusively to hidden albums.
     # An asset with no album membership is always shown.
