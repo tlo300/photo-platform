@@ -295,6 +295,7 @@ export default function Home() {
   // Timeline state
   const [items, setItems] = useState<AssetItem[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null | undefined>(undefined);
+  const [prevCursor, setPrevCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -308,7 +309,10 @@ export default function Home() {
   // Layout
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
+  const topSentinelRef = useRef<HTMLDivElement | null>(null);
   const gridRef = useRef<HTMLDivElement | null>(null);
+  // Saved before prepending items — useLayoutEffect restores scroll position after render.
+  const scrollAnchor = useRef<{ scrollTop: number; scrollHeight: number } | null>(null);
   const [containerWidth, setContainerWidth] = useState(0);
   const [activeYear, setActiveYear] = useState<number | null>(null);
   const [allYears, setAllYears] = useState<number[]>([]);
@@ -343,8 +347,16 @@ export default function Home() {
     didRestoreScroll.current = true;
   }, [items]);
 
-  // After items update (year prefetch), scroll to the pending selector.
+  // After items update: either compensate for prepended items or scroll to pending selector.
   useLayoutEffect(() => {
+    // Prepend compensation — adjust scrollTop so the viewport doesn't jump.
+    if (scrollAnchor.current && scrollRef.current) {
+      const delta = scrollRef.current.scrollHeight - scrollAnchor.current.scrollHeight;
+      scrollRef.current.scrollTop = scrollAnchor.current.scrollTop + delta;
+      scrollAnchor.current = null;
+      return;
+    }
+    // Year-jump scroll to the target section.
     if (!pendingScrollSelector.current || !scrollRef.current) return;
     const el = scrollRef.current;
     const target = el.querySelector<HTMLElement>(pendingScrollSelector.current);
@@ -369,6 +381,33 @@ export default function Home() {
         const page = await getAssets(token, cursor);
         setItems((prev) => (cursor ? [...prev, ...page.items] : page.items));
         setNextCursor(page.next_cursor);
+        // prev_cursor is only meaningful on the initial fetch (no cursor) — null there.
+        // When appending more pages downward, prevCursor stays as-is.
+        if (!cursor) setPrevCursor(page.prev_cursor);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Failed to load photos");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [token]
+  );
+
+  const fetchPrevPage = useCallback(
+    async (before: string) => {
+      if (!token) return;
+      setLoading(true);
+      setError(null);
+      try {
+        const page = await getAssets(token, undefined, 50, undefined, before);
+        if (page.items.length > 0 && scrollRef.current) {
+          scrollAnchor.current = {
+            scrollTop: scrollRef.current.scrollTop,
+            scrollHeight: scrollRef.current.scrollHeight,
+          };
+        }
+        setItems((prev) => [...page.items, ...prev]);
+        setPrevCursor(page.prev_cursor);
       } catch (e) {
         setError(e instanceof Error ? e.message : "Failed to load photos");
       } finally {
@@ -389,7 +428,7 @@ export default function Home() {
     getAssetYears(token).then(setAllYears);
   }, [ready, token]);
 
-  // Infinite scroll — observe sentinel relative to the inner scroll container.
+  // Infinite scroll downward — observe bottom sentinel.
   useEffect(() => {
     const el = sentinelRef.current;
     const root = scrollRef.current;
@@ -405,6 +444,23 @@ export default function Home() {
     observer.observe(el);
     return () => observer.disconnect();
   }, [nextCursor, loading, fetchPage]);
+
+  // Infinite scroll upward — observe top sentinel.
+  useEffect(() => {
+    const el = topSentinelRef.current;
+    const root = scrollRef.current;
+    if (!el || !root) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && prevCursor && !loading) {
+          fetchPrevPage(prevCursor);
+        }
+      },
+      { root, rootMargin: "400px" }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [prevCursor, loading, fetchPrevPage]);
 
   // Debounced search
   useEffect(() => {
@@ -496,6 +552,7 @@ export default function Home() {
       pendingScrollSelector.current = selector;
       setItems(page.items);
       setNextCursor(page.next_cursor);
+      setPrevCursor(page.prev_cursor);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load photos");
     } finally {
@@ -568,6 +625,7 @@ export default function Home() {
                   No photos yet. Import your Takeout to get started.
                 </p>
               )}
+              <div ref={topSentinelRef} className="h-1" />
               <div ref={gridRef}>
                 {groups.map((group) => (
                   <DaySection

@@ -327,6 +327,7 @@ export interface AssetItem {
 export interface AssetsPage {
   items: AssetItem[];
   next_cursor: string | null;
+  prev_cursor: string | null;
 }
 
 export async function getAssets(
@@ -334,10 +335,12 @@ export async function getAssets(
   cursor?: string,
   limit = 50,
   dateTo?: string,
+  before?: string,
 ): Promise<AssetsPage> {
   const params = new URLSearchParams({ limit: String(limit) });
   if (cursor) params.set("cursor", cursor);
   if (dateTo) params.set("date_to", dateTo);
+  if (before) params.set("before", before);
   const res = await fetch(`${CLIENT_API_URL}/assets?${params}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
