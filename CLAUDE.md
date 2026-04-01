@@ -79,10 +79,25 @@ Update this section at the end of every working session.
 
 ```
 Active milestone : Extra Requirements
-Last completed  : 2026-04-01 Deletion logic from UI — PR #186
+Last completed  : 2026-04-01 Album deletion — issue #183
 In progress     : (none)
 Blocked         : (none)
 ```
+
+### Handoff — 2026-04-01 (Album deletion — issue #183)
+**Completed:**
+- `backend/app/services/storage.py`: added `delete_objects(keys: list[str])` — S3 batch delete in chunks of 1000, best-effort (logs warning on `ClientError`, does not raise)
+- `backend/app/api/albums.py`: added `exclusive_asset_count: int` to `AlbumDetail` (computed with EXISTS subquery using `AlbumAsset.__table__.alias("_aa_inner")` to avoid SQLAlchemy auto-correlation); extended `DELETE /albums/{id}` with `delete_exclusive_assets: bool = Query(default=False)` — when true, collects exclusive asset IDs, builds 6 storage keys per asset, deletes DB rows, then commits, then batch-deletes storage (commit-before-storage-delete ordering is critical)
+- `backend/tests/test_storage_delete_objects.py`: 4 unit tests (single chunk, 3 chunks for 2500 keys, empty no-op, ClientError logged not raised)
+- `backend/tests/test_delete_album.py`: 9 integration tests (exclusive_asset_count: empty=0, all exclusive=N, shared=0; delete: default no assets deleted, with flag exclusive gone + storage called, shared survives, 404, RLS 404, 401)
+- `frontend/src/lib/api.ts`: added `AlbumDetailItem extends AlbumItem` with `asset_ids` and `exclusive_asset_count`; `getAlbum(token, albumId)` and `deleteAlbum(token, albumId, deleteExclusiveAssets)`
+- `frontend/src/app/albums/[id]/page.tsx`: album detail now calls `getAlbum` directly (was `listAlbums().find()`); "Delete album" button in header; confirmation modal with optional "Also delete N photos" checkbox (only shown when `exclusive_asset_count > 0`); modal has `role="dialog"`, `aria-modal`, `aria-labelledby`, backdrop click-to-close, autoFocus on Cancel; on success `router.push("/albums")`
+
+**Gotchas:**
+- SQLAlchemy auto-correlates EXISTS subqueries when the subquery references a table already in the outer FROM clause — both occurrences of the exclusive-asset query use `AlbumAsset.__table__.alias("_aa_inner")` (same pattern as the `_loc_exists` fix in #179)
+- DB mutations must commit before storage delete — if commit fails after storage delete, rows remain but S3 objects are gone permanently (unrecoverable data loss)
+- PATCH endpoints (`updateAlbumHidden`, `updateAlbumCover`) return `AlbumItem` not `AlbumDetailItem` — preserve extra fields with spread: `setAlbum({ ...updated, exclusive_asset_count: album.exclusive_asset_count, asset_ids: album.asset_ids })`
+- No PR created — worktree branch was merged directly to main and issue was closed with `gh issue close 183`
 
 ### Handoff — 2026-04-01 (Deletion logic from UI — PR #186)
 **Completed:**
