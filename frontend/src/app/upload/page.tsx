@@ -471,6 +471,9 @@ export default function UploadPage() {
       {/* ---- Phase: processing ---- */}
       {phase === "processing" && (
         <div className="flex flex-col items-center gap-3 w-full max-w-sm">
+          <p className="text-xs text-gray-500 dark:text-gray-400 text-center">
+            Upload complete — you can safely leave this page. Processing continues in the background.
+          </p>
           {job && job.total != null ? (() => {
             const pct = Math.round((job.processed / job.total) * 100);
             const elapsed = (Date.now() - processingStartRef.current) / 1000;
