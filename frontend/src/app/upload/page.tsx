@@ -328,6 +328,12 @@ export default function UploadPage() {
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center gap-6 p-8 bg-white dark:bg-gray-900">
+      <button
+        onClick={() => router.push("/")}
+        className="self-start text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+      >
+        ← Back
+      </button>
       <h1 className="text-2xl font-bold">Upload Photos &amp; Videos</h1>
 
       {/* ---- Phase: idle ---- */}

@@ -79,10 +79,14 @@ Update this section at the end of every working session.
 
 ```
 Active milestone : Extra Requirements
-Last completed  : 2026-04-01 Rename person from detail page — PR #182
+Last completed  : 2026-04-01 Upload back button — PR #184
 In progress     : (none)
 Blocked         : (none)
 ```
+
+### Handoff — 2026-04-01 (Upload back button — PR #184)
+**Completed:**
+- `frontend/src/app/upload/page.tsx`: added `← Back` button at the top of the page (above the h1), always visible, navigates to `/` via `router.push`
 
 ### Handoff — 2026-04-01 (Rename person from detail page — PR #182)
 **Completed:**
