@@ -6,7 +6,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
-import { getAsset, getAdjacentAssets, listAlbums, addAssetsToAlbum, getAssetAlbums, AssetDetail, AdjacentAssets, AlbumItem, AssetAlbumItem } from "@/lib/api";
+import { getAsset, getAdjacentAssets, listAlbums, addAssetsToAlbum, getAssetAlbums, deleteAsset, AssetDetail, AdjacentAssets, AlbumItem, AssetAlbumItem } from "@/lib/api";
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -50,6 +50,11 @@ export default function AssetDetailPage() {
 
   // "photo" shows the still; "live" plays the companion video.
   const [liveMode, setLiveMode] = useState<"photo" | "live">("photo");
+
+  // Delete confirmation modal
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
     if (ready && !token) router.replace("/login");
@@ -105,6 +110,19 @@ export default function AssetDetailPage() {
       setAddError(e instanceof Error ? e.message : "Failed to add to album");
     } finally {
       setAdding(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (!token || !asset) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await deleteAsset(token, asset.id);
+      router.push("/");
+    } catch (e) {
+      setDeleteError(e instanceof Error ? e.message : "Failed to delete");
+      setDeleting(false);
     }
   }
 
@@ -190,7 +208,50 @@ export default function AssetDetailPage() {
             </svg>
           </button>
         </div>
+        {/* Delete */}
+        <button
+          onClick={() => setShowDeleteModal(true)}
+          aria-label="Delete photo"
+          className="rounded p-1 text-gray-500 hover:bg-red-50 hover:text-red-600 dark:text-gray-400 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-5 w-5">
+            <path fillRule="evenodd" d="M8.75 1A2.75 2.75 0 0 0 6 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 1 0 .23 1.482l.149-.022.841 10.518A2.75 2.75 0 0 0 7.596 19h4.807a2.75 2.75 0 0 0 2.742-2.53l.841-10.52.149.023a.75.75 0 0 0 .23-1.482A41.03 41.03 0 0 0 14 4.193V3.75A2.75 2.75 0 0 0 11.25 1h-2.5ZM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4ZM8.58 7.72a.75.75 0 0 0-1.5.06l.3 7.5a.75.75 0 1 0 1.5-.06l-.3-7.5Zm4.34.06a.75.75 0 1 0-1.5-.06l-.3 7.5a.75.75 0 1 0 1.5.06l.3-7.5Z" clipRule="evenodd" />
+          </svg>
+        </button>
       </div>
+
+      {/* Delete confirmation modal */}
+      {showDeleteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="w-full max-w-sm rounded-lg bg-white p-6 shadow-xl dark:bg-gray-800">
+            <h2 className="mb-2 text-base font-semibold text-gray-900 dark:text-gray-100">Delete photo?</h2>
+            <p className="mb-5 text-sm text-gray-600 dark:text-gray-400">
+              This will permanently delete the photo and cannot be undone.
+            </p>
+            {deleteError && (
+              <p className="mb-3 rounded bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-400">
+                {deleteError}
+              </p>
+            )}
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => { setShowDeleteModal(false); setDeleteError(null); }}
+                disabled={deleting}
+                className="rounded border border-gray-200 px-4 py-2 text-sm text-gray-700 hover:border-gray-400 disabled:opacity-40 dark:border-gray-600 dark:text-gray-300 dark:hover:border-gray-500"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDelete}
+                disabled={deleting}
+                className="rounded bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-40"
+              >
+                {deleting ? "Deleting…" : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="mx-auto max-w-5xl px-4 py-6 lg:flex lg:gap-8">
         {/* Media */}
