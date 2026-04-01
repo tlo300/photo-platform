@@ -8,12 +8,13 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import {
-  listAlbums,
+  getAlbum,
   getAlbumAssets,
   removeAssetFromAlbum,
   updateAlbumHidden,
   updateAlbumCover,
-  AlbumItem,
+  deleteAlbum,
+  AlbumDetailItem,
   AlbumAssetItem,
   AssetItem,
 } from "@/lib/api";
@@ -260,7 +261,7 @@ export default function AlbumDetailPage() {
   const params = useParams<{ id: string }>();
   const albumId = params.id;
 
-  const [album, setAlbum] = useState<AlbumItem | null>(null);
+  const [album, setAlbum] = useState<AlbumDetailItem | null>(null);
   const [assets, setAssets] = useState<AlbumAssetItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -268,6 +269,10 @@ export default function AlbumDetailPage() {
   const [togglingHidden, setTogglingHidden] = useState(false);
   const [settingCover, setSettingCover] = useState(false);
   const [containerWidth, setContainerWidth] = useState(0);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteExclusive, setDeleteExclusive] = useState(false);
 
   const gridRef = useRef<HTMLDivElement>(null);
 
@@ -294,12 +299,11 @@ export default function AlbumDetailPage() {
     setLoading(true);
     setError(null);
     try {
-      const [allAlbums, albumAssets] = await Promise.all([
-        listAlbums(token),
+      const [albumData, albumAssets] = await Promise.all([
+        getAlbum(token, albumId),
         getAlbumAssets(token, albumId),
       ]);
-      const found = allAlbums.find((a) => a.id === albumId) ?? null;
-      setAlbum(found);
+      setAlbum(albumData);
       setAssets(albumAssets);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load album");
@@ -317,7 +321,7 @@ export default function AlbumDetailPage() {
     setTogglingHidden(true);
     try {
       const updated = await updateAlbumHidden(token, albumId, !album.is_hidden);
-      setAlbum(updated);
+      setAlbum({ ...updated, exclusive_asset_count: album.exclusive_asset_count, asset_ids: album.asset_ids });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to update album");
     } finally {
@@ -330,11 +334,24 @@ export default function AlbumDetailPage() {
     setSettingCover(true);
     try {
       const updated = await updateAlbumCover(token, albumId, assetId);
-      setAlbum(updated);
+      setAlbum({ ...updated, exclusive_asset_count: album.exclusive_asset_count, asset_ids: album.asset_ids });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to set cover photo");
     } finally {
       setSettingCover(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (!token || !album || deleting) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await deleteAlbum(token, albumId, deleteExclusive);
+      router.push("/albums");
+    } catch (e) {
+      setDeleteError(e instanceof Error ? e.message : "Failed to delete album");
+      setDeleting(false);
     }
   }
 
@@ -382,34 +399,46 @@ export default function AlbumDetailPage() {
           )}
         </div>
         {album && (
-          <button
-            onClick={handleToggleHidden}
-            disabled={togglingHidden}
-            className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm transition-colors disabled:opacity-40 ${
-              album.is_hidden
-                ? "border-gray-300 bg-gray-100 text-gray-500 hover:border-gray-400 hover:text-gray-700 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-400 dark:hover:border-gray-500"
-                : "border-gray-200 text-gray-500 hover:border-gray-400 hover:text-gray-700 dark:border-gray-700 dark:text-gray-400 dark:hover:border-gray-500"
-            }`}
-            title={album.is_hidden ? "Show in feed" : "Hide from feed"}
-          >
-            {album.is_hidden ? (
-              <>
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
-                  <path fillRule="evenodd" d="M3.28 2.22a.75.75 0 0 0-1.06 1.06l14.5 14.5a.75.75 0 1 0 1.06-1.06l-1.745-1.745a10.029 10.029 0 0 0 3.3-4.38 1.651 1.651 0 0 0 0-1.185A10.004 10.004 0 0 0 9.999 3a9.956 9.956 0 0 0-4.744 1.194L3.28 2.22ZM7.752 6.69l1.092 1.092a2.5 2.5 0 0 1 3.374 3.373l1.091 1.092a4 4 0 0 0-5.557-5.557Z" clipRule="evenodd" />
-                  <path d="M10.748 13.93l2.523 2.523a9.987 9.987 0 0 1-3.27.547c-4.258 0-7.894-2.66-9.337-6.41a1.651 1.651 0 0 1 0-1.186A10.007 10.007 0 0 1 2.839 6.02L6.07 9.252a4 4 0 0 0 4.678 4.678Z" />
-                </svg>
-                Hidden from feed
-              </>
-            ) : (
-              <>
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
-                  <path d="M10 12.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z" />
-                  <path fillRule="evenodd" d="M.664 10.59a1.651 1.651 0 0 1 0-1.186A10.004 10.004 0 0 1 10 3c4.257 0 7.893 2.66 9.336 6.41.147.381.146.804 0 1.186A10.004 10.004 0 0 1 10 17c-4.257 0-7.893-2.66-9.336-6.41Z" clipRule="evenodd" />
-                </svg>
-                Visible in feed
-              </>
-            )}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleToggleHidden}
+              disabled={togglingHidden}
+              className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm transition-colors disabled:opacity-40 ${
+                album.is_hidden
+                  ? "border-gray-300 bg-gray-100 text-gray-500 hover:border-gray-400 hover:text-gray-700 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-400 dark:hover:border-gray-500"
+                  : "border-gray-200 text-gray-500 hover:border-gray-400 hover:text-gray-700 dark:border-gray-700 dark:text-gray-400 dark:hover:border-gray-500"
+              }`}
+              title={album.is_hidden ? "Show in feed" : "Hide from feed"}
+            >
+              {album.is_hidden ? (
+                <>
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                    <path fillRule="evenodd" d="M3.28 2.22a.75.75 0 0 0-1.06 1.06l14.5 14.5a.75.75 0 1 0 1.06-1.06l-1.745-1.745a10.029 10.029 0 0 0 3.3-4.38 1.651 1.651 0 0 0 0-1.185A10.004 10.004 0 0 0 9.999 3a9.956 9.956 0 0 0-4.744 1.194L3.28 2.22ZM7.752 6.69l1.092 1.092a2.5 2.5 0 0 1 3.374 3.373l1.091 1.092a4 4 0 0 0-5.557-5.557Z" clipRule="evenodd" />
+                    <path d="M10.748 13.93l2.523 2.523a9.987 9.987 0 0 1-3.27.547c-4.258 0-7.894-2.66-9.337-6.41a1.651 1.651 0 0 1 0-1.186A10.007 10.007 0 0 1 2.839 6.02L6.07 9.252a4 4 0 0 0 4.678 4.678Z" />
+                  </svg>
+                  Hidden from feed
+                </>
+              ) : (
+                <>
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                    <path d="M10 12.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z" />
+                    <path fillRule="evenodd" d="M.664 10.59a1.651 1.651 0 0 1 0-1.186A10.004 10.004 0 0 1 10 3c4.257 0 7.893 2.66 9.336 6.41.147.381.146.804 0 1.186A10.004 10.004 0 0 1 10 17c-4.257 0-7.893-2.66-9.336-6.41Z" clipRule="evenodd" />
+                  </svg>
+                  Visible in feed
+                </>
+              )}
+            </button>
+            <button
+              onClick={() => { setDeleteExclusive(false); setDeleteError(null); setShowDeleteModal(true); }}
+              className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-500 transition-colors hover:border-red-300 hover:text-red-600 dark:border-gray-700 dark:text-gray-400 dark:hover:border-red-700 dark:hover:text-red-400"
+              title="Delete album"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                <path fillRule="evenodd" d="M8.75 1A2.75 2.75 0 0 0 6 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 1 0 .23 1.482l.149-.022.841 10.518A2.75 2.75 0 0 0 7.596 19h4.807a2.75 2.75 0 0 0 2.742-2.53l.841-10.52.149.023a.75.75 0 0 0 .23-1.482A41.03 41.03 0 0 0 14 4.193V3.75A2.75 2.75 0 0 0 11.25 1h-2.5ZM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4ZM8.58 7.72a.75.75 0 0 0-1.5.06l.3 7.5a.75.75 0 1 0 1.5-.06l-.3-7.5Zm4.34.06a.75.75 0 1 0-1.5-.06l-.3 7.5a.75.75 0 1 0 1.5.06l.3-7.5Z" clipRule="evenodd" />
+              </svg>
+              Delete
+            </button>
+          </div>
         )}
       </div>
 
@@ -439,6 +468,71 @@ export default function AlbumDetailPage() {
           />
         ))}
       </div>
+
+      {showDeleteModal && album && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-album-dialog-title"
+          onClick={() => { if (!deleting) { setShowDeleteModal(false); setDeleteError(null); } }}
+        >
+          <div
+            className="w-full max-w-sm rounded-lg bg-white p-6 shadow-xl dark:bg-gray-800"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2
+              id="delete-album-dialog-title"
+              className="mb-2 text-base font-semibold text-gray-900 dark:text-gray-100"
+            >
+              Delete album?
+            </h2>
+            <p className="mb-4 text-sm text-gray-600 dark:text-gray-300">
+              <strong>&ldquo;{album.title}&rdquo;</strong> will be permanently deleted. This cannot be undone.
+            </p>
+            {album.exclusive_asset_count > 0 && (
+              <label className="mb-4 flex cursor-pointer items-start gap-3">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 flex-shrink-0"
+                  checked={deleteExclusive}
+                  onChange={(e) => setDeleteExclusive(e.target.checked)}
+                />
+                <span className="text-sm text-gray-700 dark:text-gray-300">
+                  Also delete{" "}
+                  <strong>
+                    {album.exclusive_asset_count}{" "}
+                    {album.exclusive_asset_count === 1 ? "photo" : "photos"}
+                  </strong>{" "}
+                  that {album.exclusive_asset_count === 1 ? "is" : "are"} only in this album and nowhere else
+                </span>
+              </label>
+            )}
+            {deleteError && (
+              <p className="mb-3 rounded bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-400">
+                {deleteError}
+              </p>
+            )}
+            <div className="flex justify-end gap-3">
+              <button
+                autoFocus
+                onClick={() => { setShowDeleteModal(false); setDeleteError(null); }}
+                disabled={deleting}
+                className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-40 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDelete}
+                disabled={deleting}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm text-white hover:bg-red-700 disabled:opacity-40"
+              >
+                {deleting ? "Deleting…" : "Delete album"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
