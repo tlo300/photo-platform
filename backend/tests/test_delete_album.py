@@ -245,3 +245,145 @@ async def test_exclusive_asset_count_shared_asset(user_token, migrator_engine):
         )
     assert resp.status_code == 200
     assert resp.json()["exclusive_asset_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_delete_album_only_assets_remain(user_token, migrator_engine):
+    """DELETE /albums/{id} removes album row; assets are not deleted."""
+    user_id = _get_user_id(migrator_engine, "user-del-album")
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post(
+            "/albums", json={"title": "To Delete"},
+            headers={"Authorization": f"Bearer {user_token}"},
+        )
+        assert resp.status_code == 201
+        album_id = resp.json()["id"]
+    asset_id = _insert_asset(migrator_engine, user_id)
+    _link_asset(migrator_engine, album_id, asset_id)
+    with patch("app.services.storage.StorageService.delete_objects"):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.delete(
+                f"/albums/{album_id}",
+                headers={"Authorization": f"Bearer {user_token}"},
+            )
+    assert resp.status_code == 204
+    # Album is gone.
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(
+            f"/albums/{album_id}",
+            headers={"Authorization": f"Bearer {user_token}"},
+        )
+    assert resp.status_code == 404
+    # Asset still exists.
+    with migrator_engine.connect() as conn:
+        row = conn.execute(
+            text("SELECT id FROM media_assets WHERE id = :id"),
+            {"id": asset_id},
+        ).fetchone()
+    assert row is not None
+
+
+@pytest.mark.asyncio
+async def test_delete_album_with_exclusive_assets(user_token, migrator_engine):
+    """DELETE /albums/{id}?delete_exclusive_assets=true deletes album and exclusive assets."""
+    user_id = _get_user_id(migrator_engine, "user-del-album")
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post(
+            "/albums", json={"title": "Delete With Assets"},
+            headers={"Authorization": f"Bearer {user_token}"},
+        )
+        assert resp.status_code == 201
+        album_id = resp.json()["id"]
+    asset_id = _insert_asset(migrator_engine, user_id)
+    _link_asset(migrator_engine, album_id, asset_id)
+    with patch("app.services.storage.StorageService.delete_objects") as mock_del:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.delete(
+                f"/albums/{album_id}?delete_exclusive_assets=true",
+                headers={"Authorization": f"Bearer {user_token}"},
+            )
+        assert resp.status_code == 204
+        # Storage batch delete was called with at least the original key.
+        assert mock_del.called
+        all_keys = mock_del.call_args[0][0]
+        assert any(asset_id in k for k in all_keys)
+    # Asset is gone from DB.
+    with migrator_engine.connect() as conn:
+        row = conn.execute(
+            text("SELECT id FROM media_assets WHERE id = :id"),
+            {"id": asset_id},
+        ).fetchone()
+    assert row is None
+
+
+@pytest.mark.asyncio
+async def test_delete_album_shared_asset_survives(user_token, migrator_engine):
+    """DELETE ?delete_exclusive_assets=true leaves assets shared with other albums."""
+    user_id = _get_user_id(migrator_engine, "user-del-album")
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post(
+            "/albums", json={"title": "Album To Delete"},
+            headers={"Authorization": f"Bearer {user_token}"},
+        )
+        assert resp.status_code == 201
+        album_to_delete = resp.json()["id"]
+        resp = await client.post(
+            "/albums", json={"title": "Keeper Album"},
+            headers={"Authorization": f"Bearer {user_token}"},
+        )
+        assert resp.status_code == 201
+        keeper_album = resp.json()["id"]
+    shared_asset = _insert_asset(migrator_engine, user_id)
+    _link_asset(migrator_engine, album_to_delete, shared_asset)
+    _link_asset(migrator_engine, keeper_album, shared_asset)
+    with patch("app.services.storage.StorageService.delete_objects"):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.delete(
+                f"/albums/{album_to_delete}?delete_exclusive_assets=true",
+                headers={"Authorization": f"Bearer {user_token}"},
+            )
+    assert resp.status_code == 204
+    # Shared asset still exists.
+    with migrator_engine.connect() as conn:
+        row = conn.execute(
+            text("SELECT id FROM media_assets WHERE id = :id"),
+            {"id": shared_asset},
+        ).fetchone()
+    assert row is not None
+
+
+@pytest.mark.asyncio
+async def test_delete_album_not_found(user_token):
+    """DELETE /albums/{id} returns 404 for a non-existent album."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.delete(
+            f"/albums/{uuid.uuid4()}",
+            headers={"Authorization": f"Bearer {user_token}"},
+        )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_album_rls_isolation(user_token, other_user_token, migrator_engine):
+    """Cannot delete another user's album — returns 404."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post(
+            "/albums", json={"title": "Other User Album"},
+            headers={"Authorization": f"Bearer {other_user_token}"},
+        )
+        assert resp.status_code == 201
+        other_album_id = resp.json()["id"]
+        # Attempt to delete it as user_token (different user).
+        resp = await client.delete(
+            f"/albums/{other_album_id}",
+            headers={"Authorization": f"Bearer {user_token}"},
+        )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_album_unauthenticated():
+    """DELETE /albums/{id} without auth returns 401."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.delete(f"/albums/{uuid.uuid4()}")
+    assert resp.status_code == 401
