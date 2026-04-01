@@ -79,10 +79,21 @@ Update this section at the end of every working session.
 
 ```
 Active milestone : Extra Requirements
-Last completed  : 2026-04-01 Upload back button — PR #184
+Last completed  : 2026-04-01 Deletion logic from UI — PR #186
 In progress     : (none)
 Blocked         : (none)
 ```
+
+### Handoff — 2026-04-01 (Deletion logic from UI — PR #186)
+**Completed:**
+- `backend/app/api/assets.py`: added `DELETE /assets/{asset_id}` endpoint (204/404); collects all storage keys to delete (original, live video, thumbnails, display WebP, asset.json, pair.json) and calls `storage_service.delete()` best-effort per key; then `session.delete(asset)` + commit — FK cascade handles MediaMetadata, Location, AlbumAsset, AssetTag rows
+- `frontend/src/lib/api.ts`: `deleteAsset(token, id)` — DELETE to `/assets/{id}`, throws on non-2xx
+- `frontend/src/app/assets/[id]/page.tsx`: trash icon button in top bar (red hover); `showDeleteModal` / `deleting` / `deleteError` state; confirmation modal with "permanently delete" warning; on confirm calls `deleteAsset` then `router.push("/")`; error shown inline if API call fails
+- `backend/tests/test_delete_asset.py`: 4 integration tests (happy path + storage keys verified, 404, RLS isolation, unauthenticated)
+
+**Gotchas:**
+- Storage `delete_object` is idempotent in S3/MinIO — deleting a non-existent key (e.g. thumbnail not yet generated) does not raise; all keys deleted best-effort with a `logger.warning` on failure
+- After deletion, `router.push("/")` is used instead of `router.back()` — the back target could be the modal or detail page for the now-deleted asset, which would 404
 
 ### Handoff — 2026-04-01 (Upload back button — PR #184)
 **Completed:**
