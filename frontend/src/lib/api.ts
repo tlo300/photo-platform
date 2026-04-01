@@ -687,6 +687,17 @@ export async function renamePerson(
   return res.json();
 }
 
+export async function deleteAsset(token: string, id: string): Promise<void> {
+  const res = await fetch(`${CLIENT_API_URL}/assets/${id}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error((data as { detail?: string }).detail ?? "Failed to delete asset");
+  }
+}
+
 export async function createInvitation(
   token: string,
   email: string

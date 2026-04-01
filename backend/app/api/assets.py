@@ -16,6 +16,7 @@ Endpoints:
 
 import base64
 import json
+import logging
 import uuid
 from datetime import datetime
 from typing import Literal
@@ -35,6 +36,8 @@ from app.models.tag import AssetTag, Tag
 from app.services.storage import StorageError, storage_service
 
 router = APIRouter(prefix="/assets", tags=["assets"])
+
+logger = logging.getLogger(__name__)
 
 _GOOGLE_PEOPLE_SOURCE = "google_people"
 _DEFAULT_PAGE_SIZE = 50
@@ -827,3 +830,47 @@ async def get_adjacent_assets(
     )
 
     return AdjacentAssets(prev_id=prev_row, next_id=next_row)
+
+
+@router.delete("/{asset_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_asset(
+    asset_id: uuid.UUID = Path(..., description="Asset UUID"),
+    user_id: uuid.UUID = Depends(get_current_user),
+    session: AsyncSession = Depends(get_authed_session),
+) -> None:
+    """Permanently delete an asset owned by the authenticated user.
+
+    Deletes the original file, live video (if any), thumbnails, and companion
+    JSON files from object storage, then removes the database record.  Related
+    rows (MediaMetadata, Location, AlbumAsset, AssetTag) are removed by FK
+    cascade.  Storage deletions are best-effort: a missing object does not
+    abort the request.
+
+    Returns 404 if the asset does not exist or belongs to another user.
+    """
+    asset = await session.scalar(
+        select(MediaAsset).where(
+            MediaAsset.id == asset_id,
+            MediaAsset.owner_id == user_id,
+        )
+    )
+    if asset is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found.")
+
+    # Collect all storage keys to delete.
+    keys_to_delete = [asset.storage_key]
+    if asset.live_video_key:
+        keys_to_delete.append(asset.live_video_key)
+    keys_to_delete.append(_THUMBNAIL_KEY_TEMPLATE.format(user_id=user_id, asset_id=asset_id))
+    keys_to_delete.append(_DISPLAY_KEY_TEMPLATE.format(user_id=user_id, asset_id=asset_id))
+    keys_to_delete.append(f"{user_id}/{asset_id}/asset.json")
+    keys_to_delete.append(f"{user_id}/{asset_id}/pair.json")
+
+    for key in keys_to_delete:
+        try:
+            storage_service.delete(key)
+        except StorageError:
+            logger.warning("Could not delete storage key %r for asset %s", key, asset_id)
+
+    await session.delete(asset)
+    await session.commit()
