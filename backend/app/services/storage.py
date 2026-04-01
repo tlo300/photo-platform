@@ -200,6 +200,27 @@ class StorageService:
             raise StorageError(f"Delete failed for key {key!r}: {exc}") from exc
         logger.debug("Deleted %r", key)
 
+    def delete_objects(self, keys: list[str]) -> None:
+        """Batch-delete objects using the S3 delete_objects API.
+
+        Processes keys in chunks of 1000 (S3 API limit per call). Best-effort:
+        failures are logged but not raised.
+        """
+        if not keys:
+            return
+        chunk_size = 1000
+        for i in range(0, len(keys), chunk_size):
+            chunk = keys[i : i + chunk_size]
+            objects = [{"Key": k} for k in chunk]
+            try:
+                self._client.delete_objects(
+                    Bucket=self._bucket,
+                    Delete={"Objects": objects, "Quiet": True},
+                )
+            except ClientError as exc:
+                logger.warning("Batch delete failed for chunk starting at index %d: %s", i, exc)
+        logger.debug("Batch deleted %d keys", len(keys))
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------

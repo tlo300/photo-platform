@@ -499,6 +499,11 @@ export interface AlbumItem {
   created_at: string;
 }
 
+export interface AlbumDetailItem extends AlbumItem {
+  asset_ids: string[];
+  exclusive_asset_count: number;
+}
+
 export interface AlbumAssetItem {
   id: string;
   original_filename: string;
@@ -521,6 +526,17 @@ export async function listAlbums(token: string, sort: AlbumSort = "title"): Prom
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
     throw new Error((data as { detail?: string }).detail ?? "Failed to load albums");
+  }
+  return res.json();
+}
+
+export async function getAlbum(token: string, albumId: string): Promise<AlbumDetailItem> {
+  const res = await fetch(`${CLIENT_API_URL}/albums/${albumId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error((data as { detail?: string }).detail ?? "Failed to load album");
   }
   return res.json();
 }
@@ -645,6 +661,24 @@ export async function removeAssetFromAlbum(
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
     throw new Error((data as { detail?: string }).detail ?? "Failed to remove from album");
+  }
+}
+
+export async function deleteAlbum(
+  token: string,
+  albumId: string,
+  deleteExclusiveAssets: boolean
+): Promise<void> {
+  const res = await fetch(
+    `${CLIENT_API_URL}/albums/${albumId}?delete_exclusive_assets=${deleteExclusiveAssets}`,
+    {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+    }
+  );
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error((data as { detail?: string }).detail ?? "Failed to delete album");
   }
 }
 

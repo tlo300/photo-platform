@@ -5,7 +5,7 @@ Endpoints:
   GET    /albums                          — list albums (with cover thumbnail URL)
   GET    /albums/{album_id}               — single album detail
   PATCH  /albums/{album_id}               — update title / cover_asset_id
-  DELETE /albums/{album_id}               — delete album (assets are NOT deleted)
+  DELETE /albums/{album_id}               — delete album (exclusive assets optionally deleted)
   POST   /albums/{album_id}/assets        — add assets to album
   DELETE /albums/{album_id}/assets/{asset_id} — remove asset from album
   PUT    /albums/{album_id}/assets/order  — reorder assets (full ordered list)
@@ -17,7 +17,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from pydantic import BaseModel
-from sqlalchemy import delete, desc, func, nulls_last, select, update
+from sqlalchemy import delete, desc, exists, func, nulls_last, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import get_current_user
@@ -30,6 +30,7 @@ router = APIRouter(prefix="/albums", tags=["albums"])
 
 # Thumbnail key convention — must match the thumbnail worker (issue #23).
 _THUMBNAIL_KEY_TEMPLATE = "{user_id}/thumbnails/{asset_id}/thumb.webp"
+_DISPLAY_KEY_TEMPLATE = "{user_id}/thumbnails/{asset_id}/display.webp"  # used in delete_album
 
 
 # ---------------------------------------------------------------------------
@@ -51,6 +52,7 @@ class AlbumResponse(BaseModel):
 
 class AlbumDetail(AlbumResponse):
     asset_ids: list[uuid.UUID]
+    exclusive_asset_count: int
 
 
 class AlbumAssetItem(BaseModel):
@@ -232,7 +234,7 @@ async def get_album(
     user_id: uuid.UUID = Depends(get_current_user),
     session: AsyncSession = Depends(get_authed_session),
 ) -> AlbumDetail:
-    """Return album detail including ordered list of asset IDs."""
+    """Return album detail including ordered list of asset IDs and exclusive asset count."""
     album = await _get_album_or_404(album_id, user_id, session)
 
     cover_id = album.cover_asset_id
@@ -247,6 +249,22 @@ async def get_album(
     if cover_id is None and rows:
         cover_id = rows[0]
 
+    # Count assets that belong only to this album (not in any other album).
+    # Uses a table alias for the inner AlbumAsset reference to avoid SQLAlchemy
+    # auto-correlation (same pattern as the hidden-album filter in assets.py).
+    _aa_inner = AlbumAsset.__table__.alias("_aa_inner")
+    exclusive_count = await session.scalar(
+        select(func.count())
+        .select_from(AlbumAsset)
+        .where(
+            AlbumAsset.album_id == album_id,
+            ~exists().where(
+                _aa_inner.c.asset_id == AlbumAsset.asset_id,
+                _aa_inner.c.album_id != album_id,
+            ),
+        )
+    ) or 0
+
     return AlbumDetail(
         id=album.id,
         title=album.title,
@@ -258,6 +276,7 @@ async def get_album(
         is_hidden=album.is_hidden,
         created_at=album.created_at,
         asset_ids=list(rows),
+        exclusive_asset_count=exclusive_count,
     )
 
 
@@ -314,13 +333,54 @@ async def update_album(
 @router.delete("/{album_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_album(
     album_id: uuid.UUID = Path(...),
+    delete_exclusive_assets: bool = Query(default=False),
     user_id: uuid.UUID = Depends(get_current_user),
     session: AsyncSession = Depends(get_authed_session),
 ) -> None:
-    """Delete an album. Assets in the album are NOT deleted."""
+    """Delete an album.
+
+    When delete_exclusive_assets=true, also permanently deletes all assets that
+    belong only to this album (not a member of any other album). Assets shared
+    with other albums are never deleted.
+    """
     album = await _get_album_or_404(album_id, user_id, session)
+
+    keys: list[str] = []
+    if delete_exclusive_assets:
+        _aa_inner = AlbumAsset.__table__.alias("_aa_inner")
+        exclusive_assets = list(
+            await session.scalars(
+                select(MediaAsset)
+                .join(AlbumAsset, AlbumAsset.asset_id == MediaAsset.id)
+                .where(
+                    AlbumAsset.album_id == album_id,
+                    ~exists().where(
+                        _aa_inner.c.asset_id == AlbumAsset.asset_id,
+                        _aa_inner.c.album_id != album_id,
+                    ),
+                )
+            )
+        )
+
+        if exclusive_assets:
+            for asset in exclusive_assets:
+                keys.append(asset.storage_key)
+                if asset.live_video_key:
+                    keys.append(asset.live_video_key)
+                keys.append(_THUMBNAIL_KEY_TEMPLATE.format(user_id=user_id, asset_id=asset.id))
+                keys.append(_DISPLAY_KEY_TEMPLATE.format(user_id=user_id, asset_id=asset.id))
+                keys.append(f"{user_id}/{asset.id}/asset.json")
+                keys.append(f"{user_id}/{asset.id}/pair.json")
+            exclusive_ids = [a.id for a in exclusive_assets]
+            await session.execute(
+                delete(MediaAsset).where(MediaAsset.id.in_(exclusive_ids))
+            )
+
     await session.delete(album)
     await session.commit()
+
+    if keys:
+        storage_service.delete_objects(keys)
 
 
 @router.post("/{album_id}/assets", status_code=status.HTTP_204_NO_CONTENT)
