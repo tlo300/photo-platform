@@ -17,7 +17,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from pydantic import BaseModel
-from sqlalchemy import delete, desc, func, nulls_last, select, update
+from sqlalchemy import delete, desc, exists, func, nulls_last, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import get_current_user
@@ -30,6 +30,7 @@ router = APIRouter(prefix="/albums", tags=["albums"])
 
 # Thumbnail key convention — must match the thumbnail worker (issue #23).
 _THUMBNAIL_KEY_TEMPLATE = "{user_id}/thumbnails/{asset_id}/thumb.webp"
+_DISPLAY_KEY_TEMPLATE = "{user_id}/thumbnails/{asset_id}/display.webp"  # used in delete_album
 
 
 # ---------------------------------------------------------------------------
@@ -51,6 +52,7 @@ class AlbumResponse(BaseModel):
 
 class AlbumDetail(AlbumResponse):
     asset_ids: list[uuid.UUID]
+    exclusive_asset_count: int
 
 
 class AlbumAssetItem(BaseModel):
@@ -232,7 +234,7 @@ async def get_album(
     user_id: uuid.UUID = Depends(get_current_user),
     session: AsyncSession = Depends(get_authed_session),
 ) -> AlbumDetail:
-    """Return album detail including ordered list of asset IDs."""
+    """Return album detail including ordered list of asset IDs and exclusive asset count."""
     album = await _get_album_or_404(album_id, user_id, session)
 
     cover_id = album.cover_asset_id
@@ -247,6 +249,22 @@ async def get_album(
     if cover_id is None and rows:
         cover_id = rows[0]
 
+    # Count assets that belong only to this album (not in any other album).
+    # Uses a table alias for the inner AlbumAsset reference to avoid SQLAlchemy
+    # auto-correlation (same pattern as the hidden-album filter in assets.py).
+    _aa_inner = AlbumAsset.__table__.alias("_aa_inner")
+    exclusive_count = await session.scalar(
+        select(func.count())
+        .select_from(AlbumAsset)
+        .where(
+            AlbumAsset.album_id == album_id,
+            ~exists().where(
+                _aa_inner.c.asset_id == AlbumAsset.asset_id,
+                _aa_inner.c.album_id != album_id,
+            ),
+        )
+    ) or 0
+
     return AlbumDetail(
         id=album.id,
         title=album.title,
@@ -258,6 +276,7 @@ async def get_album(
         is_hidden=album.is_hidden,
         created_at=album.created_at,
         asset_ids=list(rows),
+        exclusive_asset_count=exclusive_count,
     )
 
 
