@@ -17,4 +17,4 @@ filetype==1.2.0
 Pillow==12.1.1
 pillow-heif==0.22.0
 celery[redis]==5.5.1
-python-multipart==0.0.22
+python-multipart==0.0.24
