@@ -3,7 +3,7 @@ uvicorn[standard]==0.42.0
 pydantic-settings==2.13.1
 python-json-logger==4.1.0
 sqlalchemy[asyncio]==2.0.48
-alembic==1.14.0
+alembic==1.18.4
 asyncpg==0.30.0
 psycopg[binary]==3.3.3
 geoalchemy2==0.18.4
